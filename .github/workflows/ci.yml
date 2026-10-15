@@ -1,0 +1,115 @@
+name: CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# 默认只读；只有需要发 Release 的那个 job 自己提升到 contents: write
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 不依赖游戏程序集，所以来自 fork 的 PR 也能跑：版本号与 CHANGELOG 必须对得上，
+  # 否则 publish.ps1 到发版那一步才会炸。
+  meta:
+    name: Version / changelog consistency
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Version.props 的版本在 CHANGELOG.md 里有同名小节
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content -LiteralPath Version.props)).Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'Version.props 里没有版本号' }
+          $notes = Join-Path $env:RUNNER_TEMP 'notes.md'
+          ./tools/release/notes.ps1 -Version $version -OutFile $notes -Repository ''
+          $text = (Get-Content -LiteralPath $notes -Raw).Trim()
+          if ($text.Length -lt 50) { throw "CHANGELOG.md 里 $version 的小节太短（$($text.Length) 字符），像是占位" }
+          Write-Host "OK: v$version 的发布说明 $($text.Length) 字符"
+
+  # 需要私有编译参考（目标游戏的 BepInEx/core + interop），只在主仓库的非 PR 事件上跑。
+  build:
+    name: Test, build, package, release
+    needs: meta
+    if: github.event_name != 'pull_request' && github.repository == 'ChenRuoT/ScriptEngine.IL2CPP'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      BUILD_REFS_REPO: ChenRuoT/AyaHitmarker-BuildRefs
+      GAME_REFS: ${{ github.workspace }}/.buildrefs/game
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read pinned build references
+        id: refs
+        shell: pwsh
+        run: |
+          $lock = Get-Content -LiteralPath tools/release/buildrefs.lock.json -Raw | ConvertFrom-Json
+          "commit=$($lock.commit)" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout private build references (read-only deploy key)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BUILD_REFS_REPO }}
+          ref: ${{ steps.refs.outputs.commit }}
+          ssh-key: ${{ secrets.BUILD_REFS_SSH_KEY }}
+          persist-credentials: false
+          path: .buildrefs
+
+      - name: Verify and extract dependencies
+        shell: pwsh
+        run: |
+          $lock = Get-Content -LiteralPath tools/release/buildrefs.lock.json -Raw | ConvertFrom-Json
+          $zip = Join-Path '.buildrefs' $lock.archive
+          if (-not (Test-Path -LiteralPath $zip)) { throw "找不到编译参考压缩包：$zip" }
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $lock.sha256) { throw "编译参考校验失败：期望 $($lock.sha256)，实际 $actual" }
+          Expand-Archive -LiteralPath $zip -DestinationPath .buildrefs/game
+          $core = Join-Path .buildrefs/game 'BepInEx/core/BepInEx.Core.dll'
+          if (-not (Test-Path -LiteralPath $core)) { throw "编译参考结构不对，缺 $core" }
+          Write-Host "build references ready: $GAME_REFS"
+
+      - name: Offline tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/ScriptEngine.Tests -c Release -p:GameDir="$env:GAME_REFS" -warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Offline tests failed' }
+
+      - name: Package
+        shell: pwsh
+        run: ./tools/release/package.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScriptEngine.IL2CPP-release
+          path: artifacts/release/*.zip*
+          if-no-files-found: error
+
+      # 默认分支和 v* tag 才发版；同版本已有正式 Release 时 publish.ps1 自己跳过。
+      # GITHUB_TOKEN 建的 tag 不会再触发一次工作流，所以建 tag 和发版在同一次运行里完成。
+      - name: Publish version tag and release
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: ./tools/release/publish.ps1 -Commit $env:RELEASE_COMMIT -RefName $env:RELEASE_REF
