@@ -48,7 +48,8 @@ jobs:
       contents: write
     env:
       BUILD_REFS_REPO: ChenRuoT/AyaHitmarker-BuildRefs
-      GAME_REFS: ${{ github.workspace }}/.buildrefs/game
+      # 整个 job 都用它当游戏根目录：测试、package.ps1 内部的 dotnet build、以及它们建的样例项目全部继承
+      SE_GAME_DIR: ${{ github.workspace }}/.buildrefs/game
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,12 +86,12 @@ jobs:
           Expand-Archive -LiteralPath $zip -DestinationPath .buildrefs/game
           $core = Join-Path .buildrefs/game 'BepInEx/core/BepInEx.Core.dll'
           if (-not (Test-Path -LiteralPath $core)) { throw "编译参考结构不对，缺 $core" }
-          Write-Host "build references ready: $GAME_REFS"
+          Write-Host "build references ready: $env:SE_GAME_DIR"
 
       - name: Offline tests
         shell: pwsh
         run: |
-          dotnet run --project tests/ScriptEngine.Tests -c Release -p:GameDir="$env:GAME_REFS" -warnaserror
+          dotnet run --project tests/ScriptEngine.Tests -c Release -p:GameDir="$env:SE_GAME_DIR" -warnaserror
           if ($LASTEXITCODE -ne 0) { throw 'Offline tests failed' }
 
       - name: Package
