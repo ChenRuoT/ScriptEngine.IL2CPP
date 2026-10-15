@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    热键验证示例：按配置的热键（默认 F5）打印 HOTKEY_TEST_MESSAGE，消息里带处理它的代次。
+    用来验证「脚本里注入的 MonoBehaviour 能收到 Unity 的 Update / Input」以及热重载后按键改走新代次。
+    默认 F5 而不是 F7：本机 F7 被别的软件注册成了全局热键（RegisterHotKey(F7) → 1409），
+    系统层就把按键吃掉了，插件永远收不到。
+    dotnet build 之后默认把 DLL+PDB 拷到 <游戏>/BepInEx/scripts/（-p:DeployToScripts=false 关闭）。
+  -->
+  <PropertyGroup>
+    <AssemblyName>HotkeyTestScript</AssemblyName>
+    <RootNamespace>HotkeyTestScript</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <Target Name="DeployToScripts" AfterTargets="Build" Condition="'$(DeployToScripts)' != 'false'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[HotkeyTestScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

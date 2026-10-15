@@ -4,6 +4,7 @@
     <Project Path="samples/EventScript/EventScript.csproj" />
     <Project Path="samples/FaultyScript/FaultyScript.csproj" />
     <Project Path="samples/HelloScript/HelloScript.csproj" />
+    <Project Path="samples/HotkeyTestScript/HotkeyTestScript.csproj" />
     <Project Path="samples/PatchScript/PatchScript.csproj" />
     <Project Path="samples/SharedLib/SharedLib.csproj" />
   </Folder>

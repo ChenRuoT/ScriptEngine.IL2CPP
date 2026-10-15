@@ -53,6 +53,15 @@
 `scripts/` 会被递归扫描，同一批脚本之间可以互相引用。
 两个同名程序集（例如同一个依赖拷进了两个子目录）只会装第一份，其余的在日志里警告并跳过；不是 .NET 程序集的 `.dll`（0 字节、文本、LFS 指针……）超过 5 秒没动过就被忽略并警告，不会卡住重载。
 
+**验证按键要小心两件事**：按键只有在游戏窗口有焦点时才会到达插件（日志里 `[probe] focus -> False` 时按了也没用），而且**被别的软件注册成全局热键的键根本到不了任何窗口**。无人值守发按键用 `tools/send-key.ps1`：
+
+```powershell
+.\tools\send-key.ps1 F6     # 先抢前台再发一次真实按键
+.\tools\send-key.ps1 F5
+```
+
+它按**窗口类名** `UnityWndClass` 找游戏窗口（`Process.MainWindowHandle` 拿到的是 BepInEx 的控制台窗口），用 ALT 解锁前台切换限制 + `AttachThreadInput`/`SetFocus` 抢焦点，确认抢到后才用 `keybd_event` 发键。
+
 ### 示例
 
 `samples/` 里有可直接构建的示例（`dotnet build samples/<名字>` 会部署到 `<游戏>/BepInEx/scripts/`；标 † 的默认不部署，加 `-p:DeployToScripts=true`）：
@@ -60,6 +69,7 @@
 | 示例 | 演示什么 |
 |---|---|
 | `HelloScript` | 最小的可热重载插件：枚举配置项、`Assembly.Location`、带行号的堆栈 |
+| `HotkeyTestScript` | 热键：按配置的热键（默认 F5）打印一行消息，消息里带**处理它的代次**（`__g1` → `__g2`），可直接验证「热键 → 重载 → 新代次响应」 |
 | `BehaviourScript` + `SharedLib` | 注入的 MonoBehaviour（含嵌套在插件类里的）、跨 DLL 引用；守规矩的 `TidyPlugin` 和没写 `Unload()` 的 `LeakyPlugin`（引擎替它销毁组件） |
 | `FaultyScript` † | `Load()` 抛异常（带行号的错误、半路挂上的组件被清掉、不影响同一个 DLL 里别的插件）和 `[BepInIncompatibility]` |
 | `EventScript` † | 订阅游戏事件 / Unity 事件：正确退订、在 `OnDestroy` 里退订、忘了退订（旧处理器被空操作化并报告） |
@@ -142,6 +152,7 @@
 | 被重载的插件如果被**别的插件**静态引用 / `BepInDependency` 依赖 | 别的插件拿着的是旧代次的类型，不会自动更新；官方 ScriptEngine 也一样 |
 | 脚本 DLL 不能与宿主已加载的程序集同名 | 例如把 `0Harmony.dll`、`BepInEx.*.dll` 拷进 `scripts/`：引擎会在分析之前就跳过并警告，脚本改用宿主那份 |
 | 只管 `BasePlugin` | 没有 `[BepInPlugin]` 的 DLL 被当成库装载（供同批脚本引用），不会被实例化 |
+| 被别的软件注册成全局热键的按键到不了游戏 | 这种键在系统层就被吃掉了，物理按键和合成按键都一样，表现为「插件收不到这个键」。本机实测 `F7` 已被占用（`RegisterHotKey(F7)` → 1409），换一个空闲的键即可。 |
 | 特性参数里的 `typeof(被改名的类型)` 不会跟着改名 | Cecil 对自定义特性的 blob 原样写回；注入类型出现在 `[Attr(typeof(X))]` 里的情况极少见，遇到再说 |
 
 ## 工作原理（给贡献者）

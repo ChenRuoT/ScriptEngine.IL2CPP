@@ -11,3 +11,6 @@ Directory.Build.local.props
 
 # 本地工作入口文档（交接用，不入库）
 AGENTS.md
+
+# 本地评审稿 / 交接材料，故意不入库
+docs/
