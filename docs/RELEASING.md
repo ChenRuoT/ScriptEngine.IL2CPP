@@ -56,6 +56,13 @@ gh secret list --repo ChenRuoT/ScriptEngine.IL2CPP    # 确认已写入（只显
 私钥不入库。若密钥丢失或需要轮换：生成新 key → 公钥登记为 `AyaHitmarker-BuildRefs` 的只读 deploy key →
 私钥写进本仓库 secret → 两个仓库都验证一次 → 再删旧 deploy key。
 
+⚠️ 依赖仓库上可以有多把只读 deploy key，互不影响 —— 新仓库直接新加一把就行，**不必覆盖**已有 secret。
+⚠️ **用 `gh repo deploy-key add` 添加的 key 会绑在 `gh` 的登录 token 上**：一旦撤销那个 token / gh app 的授权，
+这把 deploy key 会被一起删掉，CI 随即在 checkout 那一步挂掉。不想担这个风险就从网页加
+（依赖仓库 → Settings → Deploy keys → Add deploy key，不要勾 write access）。
+当前 `ScriptEngine.IL2CPP CI (read-only)` 是用 `gh` 加的，私钥生成在本机 `~/.ssh/buildrefs_ci`（无口令）；
+记住这份风险，或者找机会改成网页添加。
+
 ## 本地构建和打包
 
 需要 .NET 10 SDK，以及目标游戏已经生成好的 BepInEx interop。`GameDir` 三选一（优先级从高到低）：
