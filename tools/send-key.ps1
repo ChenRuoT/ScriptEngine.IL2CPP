@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  给游戏窗口发一次按键（默认 F7），用于无人值守地验证脚本/引擎的热键路径。
+  给游戏窗口发一次按键，用于无人值守地验证脚本/引擎的热键路径。
 
 .DESCRIPTION
   为什么需要它：`Input.GetKeyDown` 只有在窗口收到真实按键时才会为真，而无人值守的会话里没人能用手按。
@@ -25,7 +25,8 @@
   要操作的顶层窗口类名，默认 UnityWndClass。
 
 .EXAMPLE
-  .\send-key.ps1 F7
+  .\send-key.ps1 F6      # 默认的重载热键
+  .\send-key.ps1 F5      # samples/HotkeyTestScript 的默认探针键
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Key,
