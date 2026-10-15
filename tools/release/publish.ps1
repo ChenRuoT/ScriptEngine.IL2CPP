@@ -35,14 +35,20 @@ if ([string]::IsNullOrWhiteSpace($repo)) {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repo)) { throw '拿不到仓库名：设 GITHUB_REPOSITORY，或在仓库目录里跑' }
 }
 
-$releases = gh api --paginate --slurp "repos/$repo/releases?per_page=100"
+$releasesJson = ((gh api --paginate --slurp "repos/$repo/releases?per_page=100") -join "`n").Trim()
 if ($LASTEXITCODE -ne 0) { throw '列不出已有的 release' }
-$existing = @($releases | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object tag_name -eq $tag)
+$existing = @()
+if ($releasesJson) {
+    $existing = @($releasesJson | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object tag_name -eq $tag)
+}
 if ($existing.Count -gt 0 -and -not $existing[0].draft) { Write-Host "$tag 已经发布过，跳过。" ; exit 0 }
 
-$tagRefs = gh api "repos/$repo/git/matching-refs/tags/$tag" | ConvertFrom-Json
+$tagRefsJson = ((gh api "repos/$repo/git/matching-refs/tags/$tag") -join "`n").Trim()
 if ($LASTEXITCODE -ne 0) { throw '查不到 release tag 的状态' }
-$tagRef = @($tagRefs | Where-Object ref -eq "refs/tags/$tag")
+$tagRef = @()
+if ($tagRefsJson) {
+    $tagRef = @(($tagRefsJson | ConvertFrom-Json) | Where-Object ref -eq "refs/tags/$tag")
+}
 if ($tagRef.Count -gt 0) {
     $object = $tagRef[0].object
     while ($object.type -eq 'tag') {
