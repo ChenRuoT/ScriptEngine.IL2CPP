@@ -14,7 +14,7 @@
 param(
     [ValidateSet('reload', 'unload', 'status')][string]$Command = 'reload',
     [string]$GameDir = 'D:\EFTdev\Client.1.2.0.0.47965',
-    [int]$TimeoutSec = 30
+    [int]$TimeoutSec = 60
 )
 
 $ErrorActionPreference = 'Stop'

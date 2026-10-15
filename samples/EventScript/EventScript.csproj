@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    事件订阅示例：验证「经 Il2CppInterop 订阅的游戏事件，在 Unload() 里 -= 之后是否真的退订了」。
+    - TidyEventPlugin：订阅 GlobalEventDispatcher.OnBeingHit 和 Unity 的 Application.logMessageReceived，Unload() 里退订；
+    - ForgetfulEventPlugin：订阅了不退订（反面教材，默认不启用，见源码里的配置项）。
+    不触发任何游戏事件：直接读事件委托的调用列表长度，所以在主菜单就能验证，也不会碰游戏逻辑。
+    默认不部署到 scripts/，需要时：dotnet build samples/EventScript -p:DeployToScripts=true
+  -->
+  <PropertyGroup>
+    <AssemblyName>EventScript</AssemblyName>
+    <RootNamespace>EventScript</RootNamespace>
+    <DeployToScripts Condition="'$(DeployToScripts)' == ''">false</DeployToScripts>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <!-- 游戏程序集（interop 代理），和 AyaHitmarker 的引用一致 -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(InteropDir)/Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp-firstpass"><HintPath>$(InteropDir)/Assembly-CSharp-firstpass.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Comfort"><HintPath>$(InteropDir)/Comfort.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="PlayerEnums"><HintPath>$(InteropDir)/PlayerEnums.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DissonanceVoip"><HintPath>$(InteropDir)/DissonanceVoip.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="DeployToScriptsTarget" AfterTargets="Build" Condition="'$(DeployToScripts)' == 'true'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[EventScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

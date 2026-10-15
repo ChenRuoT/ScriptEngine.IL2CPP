@@ -74,6 +74,9 @@ internal sealed class PluginRecord
     public string TypeName { get; init; } = "";
     public string File { get; init; } = "";
 
+    /// <summary>仅装载记录：插件 <c>Load()</c> 花的毫秒数。</summary>
+    public long? LoadMs { get; set; }
+
     /// <summary>仅卸载记录：<c>Unload()</c> 的返回值（插件承诺自己清理干净了吗）。</summary>
     public bool? UnloadReturned { get; set; }
 }

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Release 构建并打包成可直接解压到游戏根目录的 zip。
 

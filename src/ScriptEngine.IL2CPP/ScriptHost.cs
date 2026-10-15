@@ -11,6 +11,7 @@ using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using ScriptEngineIl2Cpp.Cleanup;
 using ScriptEngineIl2Cpp.Rewriting;
+using UnityEngine;
 
 namespace ScriptEngineIl2Cpp;
 
@@ -25,6 +26,18 @@ internal sealed class ScriptHost
 {
     private const string EngineAssemblyName = "ScriptEngine.IL2CPP";
 
+    /// <summary>插件的 Load() 超过这么久就在报告里点名。</summary>
+    private const long SlowLoadMilliseconds = 250;
+
+    /// <summary>没有注入类型的代次，卸载后最多再做这么多轮后台 GC 检查（每轮间隔 2 秒）。</summary>
+    private const int MaxWatchChecks = 8;
+
+    /// <summary>「会留在内存里」的代次，其旧日志源在卸载后多久才摘（等被 Destroy 的组件跑完 OnDestroy）。</summary>
+    private const long SourceGraceMilliseconds = 3000;
+
+    /// <summary>卸载的第二步（清缓存、放掉加载上下文）比第一步（Unload() 等）晚多久。要跨过至少一个帧尾，见 <see cref="UnloadCurrent"/>。</summary>
+    private const long RetireDelayMilliseconds = 500;
+
     private static readonly PropertyInfo PluginInstanceProperty =
         typeof(PluginInfo).GetProperty(nameof(PluginInfo.Instance), BindingFlags.Public | BindingFlags.Instance)!;
 
@@ -32,6 +45,10 @@ internal sealed class ScriptHost
     private readonly EngineSettings _settings;
     private readonly ScriptRewriter _rewriter;
     private readonly List<UnloadWatch> _watches = new();
+    private readonly List<(long DueTicks, List<ManualLogSource> Sources)> _sourceRemovals = new();
+    private readonly List<RetiringGeneration> _retiring = new();
+    private readonly HashSet<string> _staleReported = new();
+    private bool _pinDiagnosed;
     private readonly List<(int Generation, string State)> _contextHistory = new();
 
     private ScriptGeneration? _current;
@@ -47,6 +64,12 @@ internal sealed class ScriptHost
     }
 
     public ReloadReport? LastReport { get; private set; }
+
+    /// <summary>
+    /// BepInEx 的管理对象（所有插件的 <c>AddComponent&lt;T&gt;()</c> 都挂在它上面，引擎自己的组件也在上面）。
+    /// 插件 <c>Load()</c> 抛异常时，用它前后的组件快照找出该插件半路挂上去的组件。
+    /// </summary>
+    public GameObject? ManagerObject { get; set; }
 
     /// <summary>已经分配过的最大代次（失败的准备阶段不占用代次）。</summary>
     public int Generation => _generationCounter;
@@ -81,7 +104,9 @@ internal sealed class ScriptHost
 
         stopwatch.Stop();
         report.DurationMs = stopwatch.ElapsedMilliseconds;
-        LastReport = report;
+
+        // 「内容没变所以跳过」不是一次真正的重载：别拿它覆盖掉上一次真正重载的报告（status.json 的 lastReload）
+        if (!report.Skipped || LastReport is null) LastReport = report;
 
         if (report.Generation == 0 && !report.Ok)
         {
@@ -131,7 +156,9 @@ internal sealed class ScriptHost
     /// <summary>每帧调用：观察旧上下文是否被回收。</summary>
     public void Tick()
     {
+        if (_retiring.Count > 0) FinishRetirements();
         if (_watches.Count > 0) CheckWatches();
+        if (_sourceRemovals.Count > 0) RunSourceRemovals();
     }
 
     // ================================================================== 重载流程
@@ -185,35 +212,38 @@ internal sealed class ScriptHost
 
     private List<ScriptImage>? Prepare(ScriptSnapshot snapshot, int generation, ReloadReport report)
     {
-        List<ScriptImage> images;
+        // 脚本目录里混进了宿主已有的程序集（BepInEx、Harmony、Il2CppInterop、引擎自己，或同一个插件还留在 plugins/ 里）：
+        // 在脚本上下文里再装一份会造成「同名两份类型」，所以由改写器在分析之前就挡掉，让脚本解析到宿主那份。
+        var hostNames = new HashSet<string>(
+            AssemblyLoadContext.Default.Assemblies.Select(a => a.GetName().Name ?? ""),
+            StringComparer.OrdinalIgnoreCase);
+
+        string? RejectHostAssembly(string assemblyName)
+        {
+            if (!hostNames.Contains(assemblyName)) return null;
+
+            return assemblyName.Equals(EngineAssemblyName, StringComparison.OrdinalIgnoreCase)
+                ? "that is the script engine itself — remove it from the scripts folder. Skipped."
+                : $"an assembly named '{assemblyName}' is already loaded by the game/BepInEx " +
+                  "(is the same plugin also in BepInEx/plugins?). Skipped — scripts will use the host's copy.";
+        }
+
         try
         {
-            images = _rewriter.Rewrite(snapshot.Files, generation, report.Warn);
+            return _rewriter.Rewrite(snapshot.Files, generation, report.Warn, RejectHostAssembly);
+        }
+        catch (ScriptFileReader.NotReadyException ex)
+        {
+            // 符号文件还没写完之类：和「文件读不了」一样延后重试，旧代次不动
+            report.Deferred = true;
+            report.Info($"Scripts not ready yet, will retry shortly: {ex.Message}");
+            return null;
         }
         catch (Exception ex)
         {
             report.Error("Could not prepare the scripts — nothing was changed, the previous scripts stay loaded.\n" + ex);
             return null;
         }
-
-        // 脚本目录里混进了宿主已有的程序集（BepInEx、Harmony、Il2CppInterop、引擎自己，或同一个插件还留在 plugins/ 里）：
-        // 在脚本上下文里再装一份会造成「同名两份类型」，直接跳过，让脚本解析到宿主那份。
-        var hostNames = new HashSet<string>(
-            AssemblyLoadContext.Default.Assemblies.Select(a => a.GetName().Name ?? ""),
-            StringComparer.OrdinalIgnoreCase);
-
-        images.RemoveAll(image =>
-        {
-            if (!hostNames.Contains(image.AssemblyName)) return false;
-
-            report.Warn(image.AssemblyName.Equals(EngineAssemblyName, StringComparison.OrdinalIgnoreCase)
-                ? $"{Path.GetFileName(image.Path)}: that is the script engine itself — remove it from the scripts folder. Skipped."
-                : $"{Path.GetFileName(image.Path)}: an assembly named '{image.AssemblyName}' is already loaded by the game/BepInEx " +
-                  "(is the same plugin also in BepInEx/plugins?). Skipped — scripts will use the host's copy.");
-            return true;
-        });
-
-        return images;
     }
 
     // ------------------------------------------------------------------ 装载
@@ -225,7 +255,6 @@ internal sealed class ScriptHost
 
         var context = new ScriptLoadContext(id, _settings.CollectibleContexts.Value, images);
         generation.Context = context;
-        generation.InjectedTypeCount = images.Sum(i => i.RenamedTypes.Count);
         generation.AssemblyBytes = images.Sum(i => (long)i.Dll.Length);
 
         try
@@ -306,6 +335,24 @@ internal sealed class ScriptHost
             return;
         }
 
+        // [BepInIncompatibility]：和 BepInEx 自己一样，我声明了不兼容的插件已经在 → 不装；
+        // 反过来，已经装好的插件声明了和我不兼容 → 也不装（脚本是后来者，让路的应该是它）
+        foreach (var incompatibility in info.Incompatibilities)
+        {
+            if (!chainloader.Plugins.ContainsKey(incompatibility.IncompatibilityGUID)) continue;
+
+            report.Error($"Cannot load [{info}]: it is incompatible with {incompatibility.IncompatibilityGUID}, which is already loaded");
+            return;
+        }
+
+        foreach (var other in chainloader.Plugins.Values)
+        {
+            if (!other.Incompatibilities.Any(i => string.Equals(i.IncompatibilityGUID, guid, StringComparison.Ordinal))) continue;
+
+            report.Error($"Cannot load [{info}]: the already loaded plugin [{other}] declares itself incompatible with {guid}");
+            return;
+        }
+
         foreach (var dependency in info.Dependencies)
         {
             if ((dependency.Flags & BepInDependency.DependencyFlags.HardDependency) == 0) continue;
@@ -326,6 +373,14 @@ internal sealed class ScriptHost
         BasePlugin? created = null;
         void Capture(PluginInfo _, Assembly __, BasePlugin plugin) => created = plugin;
 
+        // Load() 抛异常时，用前后的组件快照找出它半路挂上去的注入组件（只记原生指针，开销可以忽略）
+        HashSet<IntPtr>? componentsBefore = null;
+        if (_settings.SweepLeftovers.Value)
+        {
+            try { componentsBefore = LeftoverSweeper.SnapshotComponents(ManagerObject); }
+            catch (Exception snapshotError) { _log.LogDebug($"Component snapshot failed: {snapshotError.Message}"); }
+        }
+
         _log.LogInfo($"Loading script [{info}]");
         chainloader.PluginLoad += Capture;
         try
@@ -333,11 +388,19 @@ internal sealed class ScriptHost
             chainloader.Plugins[guid] = info;
             RunModuleConstructor(info, assembly);
 
+            var loadWatch = Stopwatch.StartNew();
             var instance = chainloader.LoadPlugin(info, assembly);
+            loadWatch.Stop();
             PluginInstanceProperty.GetSetMethod(nonPublic: true)!.Invoke(info, new object[] { instance });
 
             generation.Plugins.Add(new LoadedPlugin(info, instance, image.AssemblyName));
-            report.Loaded.Add(Describe(info));
+            var record = Describe(info);
+            record.LoadMs = loadWatch.ElapsedMilliseconds;
+            report.Loaded.Add(record);
+
+            // 重载的大头通常是插件自己的 Load()（注入一个大的 MonoBehaviour 类就要上千毫秒）：慢的点名，免得误以为是引擎慢
+            if (record.LoadMs >= SlowLoadMilliseconds)
+                report.Info($"[{info}] Load() took {record.LoadMs} ms (most of a reload is usually the plugin's own Load(), e.g. Il2CppInterop injecting a big MonoBehaviour)");
         }
         catch (Exception ex)
         {
@@ -348,12 +411,40 @@ internal sealed class ScriptHost
             {
                 // Load() 抛出时实例已经创建、可能已经注册了一半东西：尽力让它自己收拾
                 try { created.Unload(); } catch { /* 已经出错了，别再添乱 */ }
-                RemoveLogSource(created.Log);
+
+                try { created.Config.SaveOnConfigSet = false; } // 半途夭折的实例不许再回写 .cfg
+                catch { /* ignore */ }
+
+                // 日志源不立刻摘：它半路挂上的组件（下面会清，但清不掉的、或之后的 OnDestroy）还要打日志。随本代次卸载时统一摘。
+                generation.ExtraLogSources.Add(created.Log);
             }
+
+            SweepAfterFailedLoad(generation, info, componentsBefore, report);
         }
         finally
         {
             chainloader.PluginLoad -= Capture;
+        }
+    }
+
+    /// <summary>
+    /// 插件 <c>Load()</c> 抛异常后，把它崩溃前挂到 BepInEx 管理对象上的注入组件销毁掉，免得半成品插件的 Update() 在本代次里一直跑。
+    /// 只清「Load() 之前没有、现在有」的注入组件，同一个程序集里别的、已经成功加载的插件的组件不会被误杀。
+    /// </summary>
+    private void SweepAfterFailedLoad(ScriptGeneration generation, PluginInfo info, HashSet<IntPtr>? componentsBefore, ReloadReport report)
+    {
+        if (componentsBefore is null) return;
+
+        try
+        {
+            var details = new List<string>();
+            report.SweptObjects += LeftoverSweeper.SweepNewComponents(ManagerObject, componentsBefore, generation.Assemblies, details);
+            foreach (var detail in details)
+                report.Warn($"Destroyed component(s) that [{info}] had attached before its Load() failed: {detail}");
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug($"Sweeping after a failed Load() failed: {ex.Message}");
         }
     }
 
@@ -370,6 +461,12 @@ internal sealed class ScriptHost
     }
 
     // ------------------------------------------------------------------ 卸载
+    //
+    // 分两步：
+    //   第一步（立刻）：插件自己的 Unload()、清掉没销毁的注入对象、摘掉它在 BepInEx 里的登记。新代次紧接着就能装。
+    //   第二步（延后 RetireDelayMilliseconds，由 Tick() 驱动）：抹静态缓存、把旧代次交给游戏的事件处理器换成空操作、放掉加载上下文、看它能不能被回收。
+    //   第二步要晚几帧：插件在 Unload() 里 Destroy() 掉的组件要到帧尾才真正销毁，它们的 OnDestroy 里常常要 -= 退订事件，
+    //   而退订得在 Il2CppInterop 的转换缓存里找到当初订阅用的<b>同一个</b> IL2CPP 委托 —— 缓存提前清掉，-= 就会造出一个新委托，删不掉旧的。
 
     private void UnloadCurrent(ReloadReport report)
     {
@@ -377,25 +474,15 @@ internal sealed class ScriptHost
         if (generation is null) return;
         _current = null;
 
-        var id = generation.Id;
-        var watch = UnloadGeneration(generation, report);
-        generation = null;
-
-        _watches.Add(watch);
-
-        // 放在单独的方法里：保证上面所有指向旧代次的局部变量都已经出了栈帧，GC 才收得走
-        CollectAndCheck(watch, report, includeIl2Cpp: true);
-        if (watch.Collected)
-            RecordCollected(watch, report);
-        else if (!watch.ExpectPinned)
-            report.Info($"Previous generation {id} is unloaded but its load context is not collected yet — will keep checking in the background.");
+        var logSources = RetirePlugins(generation, report);
+        _retiring.Add(new RetiringGeneration(generation, logSources, Environment.TickCount64 + RetireDelayMilliseconds));
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private UnloadWatch UnloadGeneration(ScriptGeneration generation, ReloadReport report)
+    /// <summary>第一步。返回旧代次所有插件的日志源（留到第二步之后再摘）。</summary>
+    private List<ManualLogSource> RetirePlugins(ScriptGeneration generation, ReloadReport report)
     {
         // 1. 插件自己的 Unload()（后装先卸）
-        var logSources = new List<ManualLogSource>();
+        var logSources = new List<ManualLogSource>(generation.ExtraLogSources); // 含 Load() 失败的插件留下的
         var allUnloadsClean = true;
         for (var i = generation.Plugins.Count - 1; i >= 0; i--)
         {
@@ -435,6 +522,8 @@ internal sealed class ScriptHost
             catch { /* ignore */ }
         }
 
+        generation.Plugins.Clear(); // 插件实例到此为止，别再被这一代的记录引用
+
         // 2. 清掉插件没销毁的注入对象
         if (_settings.SweepLeftovers.Value)
         {
@@ -461,12 +550,89 @@ internal sealed class ScriptHost
             }
         }
 
-        // 3. BepInEx / Il2CppInterop 的静态缓存里别留着旧类型
+        // 3. 旧代次交给游戏的事件处理器 / 回调，马上换成空操作：忘了退订的处理器不能在新代次已经跑起来之后继续执行旧代码。
+        //    这里只收集、不清缓存 —— 缓存要等到第二步，让被 Destroy 的组件的 OnDestroy 里的 -= 还能找到同一个 IL2CPP 委托。
+        try
+        {
+            var dead = new HashSet<Assembly>(generation.Assemblies);
+            var scan = StaticCachePurger.Purge(generation.Assemblies, StaticCachePurger.PurgeMode.ScanDelegates);
+            if (scan.DeadDelegateWrappers.Count > 0)
+            {
+                var neutralized = StaleDelegateNeutralizer.Neutralize(scan.DeadDelegateWrappers, dead, OnStaleHandlerInvoked);
+                if (neutralized.Neutralized > 0)
+                    report.Info($"Neutralised {neutralized.Neutralized} event handler(s)/callback(s) the old generation handed to the game " +
+                                "(if one fires after all, it is ignored and reported once)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug($"Neutralising stale handlers failed: {ex.Message}");
+        }
+
+        return logSources;
+    }
+
+    private void FinishRetirements()
+    {
+        var now = Environment.TickCount64;
+        while (true)
+        {
+            // 取出并放掉旧代次要放在单独的方法里：保证所有指向旧代次的局部变量都已经出了栈帧，下面的 GC 才收得走
+            var watch = ReleaseNextDue(now);
+            if (watch is null) return;
+
+            if (watch.ExpectPinned)
+            {
+                // 真正注入过 Unity 类型的代次：Il2CppInterop 对注入类型的原生 trampoline 持有永久 GCHandle，上下文注定回收不了 → 当场定论。
+                // 连 GC 都不用跑：全量 IL2CPP + 托管 GC 在 EFT 主菜单里要 ~250 ms，白白卡一下；也不放进 _watches 去后台反复跑。
+                RecordRetained(watch);
+                continue;
+            }
+
+            CollectAndCheck(watch, includeIl2Cpp: true);
+
+            if (watch.Collected)
+            {
+                RecordCollected(watch);
+            }
+            else
+            {
+                _watches.Add(watch);
+                _log.LogInfo($"Previous generation {watch.Generation} is unloaded but its load context is not collected yet — will keep checking in the background.");
+            }
+        }
+    }
+
+    /// <summary>第二步：取出最早到期的旧代次，清缓存、把它交给游戏的处理器换成空操作、放掉并卸载加载上下文。</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private UnloadWatch? ReleaseNextDue(long now)
+    {
+        var index = _retiring.FindIndex(r => r.DueTicks <= now);
+        if (index < 0) return null;
+
+        var retiring = _retiring[index];
+        _retiring.RemoveAt(index);
+
+        var generation = retiring.TakeGeneration();
+        var id = generation.Id;
+
+        // 3. BepInEx / Il2CppInterop 的静态缓存里别留着旧类型，旧代次交给游戏的事件处理器换成空操作
+        var dead = new HashSet<Assembly>(generation.Assemblies);
         try
         {
             var purged = StaticCachePurger.Purge(generation.Assemblies);
-            if (purged.Count > 0)
-                _log.LogDebug("Purged static caches: " + string.Join(", ", purged.Select(p => $"{p.Key} x{p.Value}")));
+            if (purged.Removed.Count > 0)
+                _log.LogInfo($"Generation {id}: purged static-cache entries that pointed at the old code: " + string.Join(", ", purged.Removed.Select(p => $"{p.Key} x{p.Value}")));
+            if (purged.ElapsedMs > 100)
+                _log.LogInfo($"Generation {id}: static cache purge scanned {purged.Scanned} entries in {purged.ElapsedMs} ms");
+
+            if (purged.DeadDelegateWrappers.Count > 0)
+            {
+                // 第一步已经处理过的会被跳过；这里补的是第一步之后（比如被延后的 OnDestroy 里）才新造出来的转换
+                var neutralized = StaleDelegateNeutralizer.Neutralize(purged.DeadDelegateWrappers, dead, OnStaleHandlerInvoked);
+                if (neutralized.Neutralized > 0)
+                    _log.LogInfo($"Generation {id}: neutralised {neutralized.Neutralized} more handler(s)/callback(s) created after Unload()");
+            }
         }
         catch (Exception ex)
         {
@@ -475,9 +641,9 @@ internal sealed class ScriptHost
 
         // 4. 断开引用并卸载上下文
         var context = generation.Context;
-        var id = generation.Id;
-        var injectedTypes = generation.InjectedTypeCount;
+        var injectedTypes = LeftoverSweeper.CountInjectedTypes(generation.Assemblies); // 实际注入过的（不是改写器认定的「候选」）
         var assemblyBytes = generation.AssemblyBytes;
+        var weakAssemblies = generation.Assemblies.Select(a => new WeakReference<Assembly>(a)).ToList();
         var weak = generation.Release();
 
         try
@@ -485,21 +651,29 @@ internal sealed class ScriptHost
             if (context is { IsCollectible: true })
                 context.Unload();
             else if (context is not null)
-                report.Warn($"Generation {id} used a non-collectible load context — its assemblies stay in memory.");
+                _log.LogWarning($"Generation {id} used a non-collectible load context — its assemblies stay in memory.");
         }
         catch (Exception ex)
         {
-            report.Warn($"AssemblyLoadContext.Unload() failed: {ex.Message}");
+            _log.LogWarning($"AssemblyLoadContext.Unload() failed: {ex.Message}");
         }
 
-        // 旧日志源先不摘：被 Destroy 的组件的 OnDestroy、甚至没清干净的旧代次代码还会继续打日志，
-        // 摘掉就等于把「旧代码还活着」这个最有用的线索吞了。等上下文真被回收了再摘。
-        return new UnloadWatch(id, weak, logSources) { ExpectPinned = injectedTypes > 0, RetainedBytes = assemblyBytes };
+        // 旧日志源先不摘：没清干净的旧代次代码还会继续打日志，摘掉就等于把「旧代码还活着」这个最有用的线索吞了。等上下文真被回收了再摘。
+        return new UnloadWatch(id, weak, retiring.LogSources) { ExpectPinned = injectedTypes > 0, RetainedBytes = assemblyBytes, Assemblies = weakAssemblies };
+    }
+
+    /// <summary>被换成空操作的旧代次处理器被触发了：说明插件没有在 Unload() 里退订它（每个处理器只报一次）。</summary>
+    private void OnStaleHandlerInvoked(string description)
+    {
+        if (!_staleReported.Add(description)) return;
+
+        _log.LogWarning($"A handler from an unloaded script generation was invoked and ignored: {description}. " +
+                        "The plugin did not unsubscribe it in Unload() — make sure every event it subscribed to is unsubscribed there.");
     }
 
     private static void RemoveLogSource(ManualLogSource source)
     {
-        try { Logger.Sources.Remove(source); }
+        try { BepInEx.Logging.Logger.Sources.Remove(source); }
         catch { /* ignore */ }
     }
 
@@ -516,7 +690,7 @@ internal sealed class ScriptHost
             if (watch.Collected)
             {
                 _watches.RemoveAt(i);
-                RecordCollected(watch, null);
+                RecordCollected(watch);
                 continue;
             }
 
@@ -524,38 +698,59 @@ internal sealed class ScriptHost
 
             watch.Checks++;
             watch.NextCheckTicks = now + 2000;
-            CollectAndCheck(watch, null, includeIl2Cpp: watch.Checks <= 2);
+            CollectAndCheck(watch, includeIl2Cpp: watch.Checks <= 4);
 
             if (watch.Collected)
             {
                 _watches.RemoveAt(i);
-                RecordCollected(watch, null);
+                RecordCollected(watch);
             }
-            else if (watch.Checks >= (watch.ExpectPinned ? 2 : 8))
+            else if (watch.Checks >= MaxWatchChecks)
             {
+                // 没有注入类型却回收不了：有东西（Harmony 补丁、事件订阅、静态缓存、活着的 Unity 对象……）还指着旧代码。
+                // 日志源故意留着 —— 残余的旧代码要是还在跑，日志是唯一线索。
                 _watches.RemoveAt(i);
                 _historyVersion++;
-                if (watch.ExpectPinned)
-                {
-                    // 预期内的「留在内存里」：旧代码已被中和，这时再摘日志源，免得每次重载都白白留一批在 Logger.Sources 里。
-                    // （意外 pinned 的代次反而保留日志源——它的残余代码还在跑的话，日志是唯一线索。）
-                    watch.LogSources.ForEach(RemoveLogSource);
-                    _contextHistory.Add((watch.Generation, "retained"));
-                    _log.LogInfo($"Generation {watch.Generation}: its assemblies stay in memory (~{watch.RetainedBytes / 1024} KB) — it injected Unity types, " +
-                                 "and Il2CppInterop never releases those. Harmless: the old code is neutralised, only the bytes remain.");
-                }
-                else
-                {
-                    _contextHistory.Add((watch.Generation, "pinned"));
-                    _log.LogWarning($"Generation {watch.Generation}: the old load context is still referenced after {watch.Checks} GC passes — " +
-                                    "something (a Harmony patch, an event handler, a static cache, a live Unity object) still points at the old code. " +
-                                    "Its assemblies stay in memory until the game exits. Make sure the plugin's Unload() undoes everything it set up.");
-                }
+                _contextHistory.Add((watch.Generation, "pinned"));
+                _log.LogWarning($"Generation {watch.Generation}: the old load context is still referenced after {watch.Checks} GC passes — " +
+                                "something (a Harmony patch on a method of the script itself, a Unity object, a static cache, a thread, a native callback…) still points at the old code. " +
+                                "Its assemblies stay in memory until the game exits. Make sure the plugin's Unload() undoes everything it set up.");
+                DiagnosePinnedGeneration(watch);
             }
         }
     }
 
-    private void RecordCollected(UnloadWatch watch, ReloadReport? report)
+    /// <summary>回收不了的代次：找出静态状态里是谁还引用着旧代码，打出引用链。每个游戏会话只做一次（它要遍历一大片对象图，可能卡一秒左右）。</summary>
+    private void DiagnosePinnedGeneration(UnloadWatch watch)
+    {
+        if (!_settings.DiagnosePinned.Value || _pinDiagnosed) return;
+        _pinDiagnosed = true;
+
+        try
+        {
+            var assemblies = new List<Assembly>();
+            foreach (var weak in watch.Assemblies)
+                if (weak.TryGetTarget(out var assembly)) assemblies.Add(assembly);
+            if (assemblies.Count == 0) return;
+
+            var result = PinFinder.Find(assemblies, maxPaths: 6, maxObjects: 300_000, timeBudgetMs: 1500);
+            if (result.Paths.Count == 0)
+            {
+                _log.LogInfo($"Generation {watch.Generation}: no static reference to the old code was found ({result.VisitedObjects} objects searched in {result.ElapsedMs} ms" +
+                             $"{(result.Truncated ? ", search truncated" : "")}) — a GCHandle (native callback, Il2CppInterop trampoline, running thread) probably holds it.");
+                return;
+            }
+
+            _log.LogWarning($"Generation {watch.Generation}: what still references the old code ({result.VisitedObjects} objects searched in {result.ElapsedMs} ms):\n  " +
+                            string.Join("\n  ", result.Paths));
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug($"Pin diagnosis failed: {ex.Message}");
+        }
+    }
+
+    private void RecordCollected(UnloadWatch watch)
     {
         var elapsed = Environment.TickCount64 - watch.CreatedTicks;
         _watches.Remove(watch);
@@ -563,13 +758,36 @@ internal sealed class ScriptHost
         _historyVersion++;
         watch.LogSources.ForEach(RemoveLogSource);
 
-        var message = $"Generation {watch.Generation}: old load context collected ({elapsed} ms after unload) — the old code is gone from memory.";
-        if (report is not null) report.Info(message);
-        else _log.LogInfo(message);
+        _log.LogInfo($"Generation {watch.Generation}: old load context collected ({elapsed} ms after unload) — the old code is gone from memory.");
+    }
+
+    private void RecordRetained(UnloadWatch watch)
+    {
+        _contextHistory.Add((watch.Generation, "retained"));
+        _historyVersion++;
+
+        // 旧日志源晚几秒再摘：被 Destroy 的组件的 OnDestroy 要等到帧尾才跑，它们的日志还得打得出来。
+        // 不摘的话每次重载都会在 Logger.Sources 里白白留下一批。
+        _sourceRemovals.Add((Environment.TickCount64 + SourceGraceMilliseconds, watch.LogSources));
+
+        _log.LogInfo($"Generation {watch.Generation}: its assemblies stay in memory (~{watch.RetainedBytes / 1024} KB) — it injected Unity types, " +
+                     "and Il2CppInterop never releases those. Harmless: the old code is neutralised, only the bytes remain.");
+    }
+
+    private void RunSourceRemovals()
+    {
+        var now = Environment.TickCount64;
+        for (var i = _sourceRemovals.Count - 1; i >= 0; i--)
+        {
+            if (_sourceRemovals[i].DueTicks > now) continue;
+
+            _sourceRemovals[i].Sources.ForEach(RemoveLogSource);
+            _sourceRemovals.RemoveAt(i);
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void CollectAndCheck(UnloadWatch watch, ReloadReport? report, bool includeIl2Cpp)
+    private void CollectAndCheck(UnloadWatch watch, bool includeIl2Cpp)
     {
         if (includeIl2Cpp && _settings.Il2CppGcAfterUnload.Value)
         {
@@ -583,6 +801,30 @@ internal sealed class ScriptHost
     }
 
     // ================================================================== 小工具
+
+    /// <summary>已经执行完第一步（Unload() 等）、等着第二步（清缓存、放掉上下文）的旧代次。</summary>
+    private sealed class RetiringGeneration
+    {
+        private ScriptGeneration? _generation;
+
+        public RetiringGeneration(ScriptGeneration generation, List<ManualLogSource> logSources, long dueTicks)
+        {
+            _generation = generation;
+            LogSources = logSources;
+            DueTicks = dueTicks;
+        }
+
+        public long DueTicks { get; }
+        public List<ManualLogSource> LogSources { get; }
+
+        /// <summary>把旧代次交出去，本对象不再引用它。</summary>
+        public ScriptGeneration TakeGeneration()
+        {
+            var generation = _generation ?? throw new InvalidOperationException("already taken");
+            _generation = null;
+            return generation;
+        }
+    }
 
     private static PluginRecord Describe(PluginInfo info) => new()
     {

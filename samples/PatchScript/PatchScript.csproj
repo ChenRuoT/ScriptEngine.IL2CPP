@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Harmony 补丁示例：补丁打在脚本自己的一个托管方法上（不碰游戏方法，所以在主菜单里验证也很安全）。
+    Unload() 里 UnpatchSelf() 撤销补丁 —— 补丁不撤销的话，Harmony/MonoMod 的内部表会一直引用旧代次的方法，旧加载上下文回收不了，
+    更糟的是旧补丁继续生效。
+    默认不部署到 scripts/，需要时：dotnet build samples/PatchScript -p:DeployToScripts=true
+  -->
+  <PropertyGroup>
+    <AssemblyName>PatchScript</AssemblyName>
+    <RootNamespace>PatchScript</RootNamespace>
+    <DeployToScripts Condition="'$(DeployToScripts)' == ''">false</DeployToScripts>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="DeployToScriptsTarget" AfterTargets="Build" Condition="'$(DeployToScripts)' == 'true'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[PatchScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

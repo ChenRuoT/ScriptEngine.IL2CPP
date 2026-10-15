@@ -55,7 +55,12 @@ internal sealed class GenerationResolver : IAssemblyResolver
 
     public void Register(AssemblyDefinition assembly) => _scripts[assembly.Name.Name] = assembly;
 
-    public AssemblyDefinition Resolve(AssemblyNameReference name) => Resolve(name, new ReaderParameters());
+    // Cecil 解析 TypeReference 时调用的是单参数重载（MetadataResolver → IAssemblyResolver.Resolve(name)）。
+    // 这里必须原样转给共享解析器的单参数重载：DefaultAssemblyResolver 只在这个重载里查/写自己的缓存，
+    // 双参数重载直接走基类 BaseAssemblyResolver —— 每次都重新打开磁盘上的 interop DLL，
+    // 返回的 AssemblyDefinition 又没人 Dispose（文件句柄泄漏，重载越来越慢）。
+    public AssemblyDefinition Resolve(AssemblyNameReference name)
+        => _scripts.TryGetValue(name.Name, out var script) ? script : _shared.Resolve(name);
 
     public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
         => _scripts.TryGetValue(name.Name, out var script) ? script : _shared.Resolve(name, parameters);

@@ -43,6 +43,10 @@ internal sealed class EngineSettings
         SweepLeftovers = config.Bind("Advanced", "SweepLeftovers", true,
             "After a plugin's Unload(), destroy the Unity objects (MonoBehaviour / ScriptableObject) of its injected types that are still alive.");
 
+        DiagnosePinned = config.Bind("Advanced", "DiagnosePinned", true,
+            "When a generation without injected Unity types still cannot be collected, search the static state of Harmony / MonoMod / Il2CppInterop / BepInEx for what " +
+            "references the old code and log the reference chains (once per game session; may freeze the game for about a second).");
+
         Il2CppGcAfterUnload = config.Bind("Advanced", "Il2CppGcAfterUnload", true,
             "Run an IL2CPP + managed GC after unloading, so the old AssemblyLoadContext can actually be collected. May cause a short hitch.");
     }
@@ -55,6 +59,7 @@ internal sealed class EngineSettings
     public ConfigEntry<bool> CollectibleContexts { get; }
     public ConfigEntry<bool> SweepLeftovers { get; }
     public ConfigEntry<bool> Il2CppGcAfterUnload { get; }
+    public ConfigEntry<bool> DiagnosePinned { get; }
 
     /// <summary>脚本目录的绝对路径。</summary>
     public string ScriptsDirectory

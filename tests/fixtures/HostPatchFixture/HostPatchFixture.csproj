@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    离线测试夹具（不是示例，不部署）：Harmony 补丁的<b>目标在宿主程序集里</b>、补丁方法在脚本里 ——
+    这才是真实插件的形状（给游戏方法打补丁）。PatchScript 示例是把补丁打在脚本自己的方法上，那会让 Harmony 的内部表引用脚本方法。
+  -->
+  <PropertyGroup>
+    <AssemblyName>HostPatchFixture</AssemblyName>
+    <RootNamespace>HostPatchFixture</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

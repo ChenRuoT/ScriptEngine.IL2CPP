@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/samples/">
     <Project Path="samples/BehaviourScript/BehaviourScript.csproj" />
+    <Project Path="samples/EventScript/EventScript.csproj" />
     <Project Path="samples/FaultyScript/FaultyScript.csproj" />
     <Project Path="samples/HelloScript/HelloScript.csproj" />
+    <Project Path="samples/PatchScript/PatchScript.csproj" />
     <Project Path="samples/SharedLib/SharedLib.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -13,5 +15,8 @@
   </Folder>
   <Folder Name="/tests/fixtures/">
     <Project Path="tests/fixtures/ConsumerFixture/ConsumerFixture.csproj" />
+    <Project Path="tests/fixtures/DerivedPluginFixture/DerivedPluginFixture.csproj" />
+    <Project Path="tests/fixtures/HostPatchFixture/HostPatchFixture.csproj" />
+    <Project Path="tests/fixtures/PluginBaseFixture/PluginBaseFixture.csproj" />
   </Folder>
 </Solution>

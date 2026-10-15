@@ -27,7 +27,11 @@ public sealed class ScriptEnginePlugin : BasePlugin
         var host = new ScriptHost(Log, settings);
 
         EngineBehaviour.Pump = new EnginePump(Log, settings, host);
-        AddComponent<EngineBehaviour>();
+
+        // 引擎的组件挂在 BepInEx 的管理对象上 —— 所有插件的 AddComponent<T>() 也挂在这同一个对象上，
+        // 脚本 Load() 抛异常时要靠它前后的组件快照清理半成品
+        var behaviour = AddComponent<EngineBehaviour>();
+        host.ManagerObject = behaviour.gameObject;
 
         Log.LogInfo($"{PluginName} {PluginVersion} ready — scripts load on the first frame; reload key: {settings.ReloadKey.Value}");
     }

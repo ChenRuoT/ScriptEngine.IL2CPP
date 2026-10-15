@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 离线测试夹具（不是示例，不部署）：继承另一个脚本程序集里的抽象插件基类。 -->
+  <PropertyGroup>
+    <AssemblyName>DerivedPluginFixture</AssemblyName>
+    <RootNamespace>DerivedPluginFixture</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <ProjectReference Include="../PluginBaseFixture/PluginBaseFixture.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

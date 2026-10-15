@@ -31,13 +31,16 @@ internal sealed class ScriptGeneration
     public int Id { get; }
     public ScriptLoadContext? Context { get; set; }
 
-    /// <summary>本代里被改名的（即会注入 IL2CPP 的）顶层类型数。非零 = Il2CppInterop 会永久钉住这一代的上下文。</summary>
-    public int InjectedTypeCount { get; set; }
-
     /// <summary>本代程序集字节数合计，用来估算钉住时泄漏的量级。</summary>
     public long AssemblyBytes { get; set; }
     public List<Assembly> Assemblies { get; } = new();
     public List<LoadedPlugin> Plugins { get; } = new();
+
+    /// <summary>
+    /// <c>Load()</c> 抛异常的插件的日志源。它没有进 <see cref="Plugins"/>，但可能已经挂上了在跑的组件，
+    /// 日志源要留到本代次卸载时才和别的一起摘。
+    /// </summary>
+    public List<BepInEx.Logging.ManualLogSource> ExtraLogSources { get; } = new();
 
     /// <summary>断开对加载上下文、程序集和插件实例的全部强引用。返回上下文的弱引用。</summary>
     public WeakReference Release()
@@ -45,6 +48,7 @@ internal sealed class ScriptGeneration
         var weak = new WeakReference(Context, trackResurrection: false);
         Plugins.Clear();
         Assemblies.Clear();
+        ExtraLogSources.Clear();
         Context = null;
         return weak;
     }
@@ -76,4 +80,10 @@ internal sealed class UnloadWatch
     public bool ExpectPinned { get; init; }
 
     public long RetainedBytes { get; init; }
+
+    /// <summary>
+    /// 旧代次的程序集（弱引用）。回收不了的时候，<see cref="Cleanup.PinFinder"/> 要靠它们才知道在找谁；
+    /// 能回收的话它们自己就消失了。
+    /// </summary>
+    public List<WeakReference<System.Reflection.Assembly>> Assemblies { get; init; } = new();
 }

@@ -45,7 +45,7 @@ internal static class StatusJson
         });
     }
 
-    public static string CommandResult(string id, string command, bool ok, ReloadReport? report, ScriptHost host, string scriptsDirectory)
+    public static string CommandResult(string id, string command, bool ok, ReloadReport? report, ScriptHost host, string scriptsDirectory, string? message = null)
     {
         return Build(writer =>
         {
@@ -55,6 +55,7 @@ internal static class StatusJson
             writer.WriteBoolean("ok", ok);
             writer.WriteNumber("generation", host.Generation);
             writer.WriteString("finishedUtc", DateTime.UtcNow.ToString("O"));
+            if (message is not null) writer.WriteString("message", message);
 
             writer.WriteStartArray("plugins");
             foreach (var plugin in host.LoadedPlugins) WritePlugin(writer, plugin);
@@ -105,6 +106,7 @@ internal static class StatusJson
         writer.WriteString("version", plugin.Version);
         writer.WriteString("type", plugin.TypeName);
         writer.WriteString("file", plugin.File);
+        if (plugin.LoadMs is { } loadMs) writer.WriteNumber("loadMs", loadMs);
         if (plugin.UnloadReturned is { } returned) writer.WriteBoolean("unloadReturned", returned);
         writer.WriteEndObject();
     }

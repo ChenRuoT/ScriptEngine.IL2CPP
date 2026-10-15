@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    离线测试夹具（不是示例，不部署）：一个抽象的 BasePlugin 基类，里面嵌套了一个注入的 MonoBehaviour。
+    引擎会把基类所在的顶层类型改名（命名空间加 .__g{N}）；继承它的插件在另一个 DLL 里，
+    引擎发现插件时必须还能顺着（被改名的）基类解析到 BasePlugin。
+  -->
+  <PropertyGroup>
+    <AssemblyName>PluginBaseFixture</AssemblyName>
+    <RootNamespace>PluginBaseFixture</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../build/GameReferences.props" />
+
+</Project>

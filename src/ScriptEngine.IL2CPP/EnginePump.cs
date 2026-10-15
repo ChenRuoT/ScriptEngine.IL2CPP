@@ -14,6 +14,9 @@ internal sealed class EnginePump : IDisposable
     /// <summary>文件没准备好时的最大重试次数（每次间隔一个安静期）。</summary>
     private const int MaxDeferredRetries = 30;
 
+    /// <summary>检查「监视器是否还健康 / 配置有没有改」的间隔。</summary>
+    private const long HealthCheckIntervalMs = 5000;
+
     private readonly ManualLogSource _log;
     private readonly EngineSettings _settings;
     private readonly ScriptHost _host;
@@ -22,11 +25,16 @@ internal sealed class EnginePump : IDisposable
 
     private bool _started;
     private bool _hotkeyBroken;
+    private long _nextHealthCheck;
+    private int _publishedHistoryVersion;
+
+    // 被延后的重载（文件正被写入 / 占用）：带着原来的触发源和 force 重试，直到成功或放弃
     private int _deferredRetries;
     private string? _retryTrigger;
     private bool _retryForce;
-    private long _nextHealthCheck;
-    private int _publishedHistoryVersion;
+
+    // 触发了被延后的重载的那条命令：结果要等重试有了结局再写，而不是立刻回一个「失败」
+    private PendingCommand? _deferredCommand;
 
     public EnginePump(ManualLogSource log, EngineSettings settings, ScriptHost host)
     {
@@ -71,6 +79,22 @@ internal sealed class EnginePump : IDisposable
             PublishStatus();
     }
 
+    /// <summary>
+    /// 让文件监视跟上运行时的配置变化：<c>AutoReload</c> 关掉就停止监视，打开就重新挂上；
+    /// <c>ScriptsDirectory</c> 改了就切到新目录；脚本目录被删掉重建、监视器报错失效后也在这里自愈。
+    /// </summary>
+    private void EnsureWatcherHealthy()
+    {
+        var now = Environment.TickCount64;
+        if (now < _nextHealthCheck) return;
+        _nextHealthCheck = now + HealthCheckIntervalMs;
+
+        if (_settings.AutoReload.Value)
+            _files.EnsureHealthy(_settings.ScriptsDirectory, message => _log.LogWarning(message));
+        else if (_files.IsWatching)
+            _files.Stop();
+    }
+
     private void PollHotkey()
     {
         var key = _settings.ReloadKey.Value;
@@ -94,6 +118,13 @@ internal sealed class EnginePump : IDisposable
 
     private void PollFiles()
     {
+        // 自动重载关着（并且没有被延后的重载在等重试）：别囤着文件事件，开关重新打开时会自己补一次
+        if (!_settings.AutoReload.Value && _retryTrigger is null)
+        {
+            _files.ClearPendingBefore(long.MaxValue);
+            return;
+        }
+
         var quietMs = (long)(_settings.AutoReloadDelay.Value * 1000f);
         if (!_files.TryConsume(quietMs)) return;
 
@@ -117,16 +148,33 @@ internal sealed class EnginePump : IDisposable
         switch (command.Command)
         {
             case "reload":
+                SupersedeDeferredCommand(command);
                 report = RunReload("command", force: true);
+
+                if (report.Deferred && _retryTrigger is not null)
+                {
+                    // 文件正在写：引擎会自己重试。命令的结果等重试有了结局再写，别让客户端拿到一个马上就会被推翻的失败
+                    _deferredCommand = command;
+                    return;
+                }
+
                 ok = report.Ok && !report.Deferred;
                 break;
+
             case "unload":
+                SupersedeDeferredCommand(command);
                 report = _host.UnloadAll("command");
                 ok = report.Ok;
+
+                // 卸载是明确的意图：别让防抖期里攒下的文件事件、或者还在重试的重载在一秒后把脚本又装回来
+                ResetRetry();
+                _files.ClearPendingBefore(Environment.TickCount64);
                 PublishStatus();
                 break;
+
             case "status":
                 break;
+
             default:
                 ok = false;
                 _log.LogWarning($"Unknown command '{command.Command}' (id {command.Id}); expected .reload / .unload / .status");
@@ -138,6 +186,7 @@ internal sealed class EnginePump : IDisposable
 
     private ReloadReport RunReload(string trigger, bool force)
     {
+        var startedTicks = Environment.TickCount64;
         var report = _host.Reload(trigger, force);
 
         if (report.Deferred)
@@ -150,33 +199,52 @@ internal sealed class EnginePump : IDisposable
             }
             else
             {
-                _deferredRetries = 0;
-                _retryTrigger = null;
-                _retryForce = false;
+                ResetRetry();
                 report.Error($"Gave up after {MaxDeferredRetries} retries: the script files are still not readable.");
+                CompleteDeferredCommand(report);
             }
         }
         else
         {
-            _deferredRetries = 0;
-            _retryTrigger = null;
-            _retryForce = false;
+            ResetRetry();
+
+            // 这次重载读到的是 startedTicks 之后磁盘上的内容：之前攒下的文件事件已经被它覆盖，
+            // 不该在防抖期过后再触发一次「内容没变」的空重载。
+            // 重载期间新到的变化时间戳更晚，会保留下来。
+            _files.ClearPendingBefore(startedTicks);
+            CompleteDeferredCommand(report);
         }
 
         PublishStatus();
         return report;
     }
 
-    /// <summary>脚本目录被删掉重建、监视器报错后失效时，隔几秒自动重新挂上。</summary>
-    private void EnsureWatcherHealthy()
+    private void ResetRetry()
     {
-        if (!_settings.AutoReload.Value) return;
+        _deferredRetries = 0;
+        _retryTrigger = null;
+        _retryForce = false;
+    }
 
-        var now = Environment.TickCount64;
-        if (now < _nextHealthCheck) return;
-        _nextHealthCheck = now + 5000;
+    /// <summary>被延后的 reload 命令有了结局（重载成功，或者放弃了）：把结果写出去。</summary>
+    private void CompleteDeferredCommand(ReloadReport report)
+    {
+        if (_deferredCommand is not { } command || _commands is null) return;
+        _deferredCommand = null;
 
-        _files.EnsureHealthy(_settings.ScriptsDirectory, message => _log.LogWarning(message));
+        var ok = report.Ok && !report.Deferred;
+        _commands.WriteResult(command, StatusJson.CommandResult(command.Id, command.Command, ok, report, _host, _settings.ScriptsDirectory));
+    }
+
+    /// <summary>又来了一条会改变脚本状态的命令：悬着的那条 reload 命令就此了结（它的重载已经被新命令接替）。</summary>
+    private void SupersedeDeferredCommand(PendingCommand successor)
+    {
+        if (_deferredCommand is not { } older || _commands is null) return;
+        _deferredCommand = null;
+
+        _commands.WriteResult(older, StatusJson.CommandResult(
+            older.Id, older.Command, ok: false, report: null, _host, _settings.ScriptsDirectory,
+            message: $"superseded by command '{successor.Id}.{successor.Command}' before the script files became readable"));
     }
 
     private void PublishStatus()

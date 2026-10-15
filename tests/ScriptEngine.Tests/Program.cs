@@ -19,7 +19,7 @@ namespace ScriptEngine.Tests;
 /// Cecil 改写、可回收上下文装载、BasePlugin 实例化与卸载、上下文回收。
 /// 退出码 0 = 全部通过。
 /// </summary>
-internal static class Program
+internal static partial class Program
 {
     private static int _failures;
     private static int _checks;
@@ -74,6 +74,7 @@ internal static class Program
             DuplicateAssemblyNamesAreSkipped();
             HelloScriptLifecycleAndCollection();
             GenerationsDoNotCollide();
+            ReviewRegressions();
         }
         finally
         {
@@ -235,7 +236,7 @@ internal static class Program
         plugin.Config.SaveOnConfigSet = false;
 
         var purged = StaticCachePurger.Purge(new[] { assembly });
-        Console.WriteLine($"    (static caches purged: {(purged.Count == 0 ? "none" : string.Join(", ", purged.Select(p => p.Key + " x" + p.Value)))})");
+        Console.WriteLine($"    (static caches purged: {(purged.Removed.Count == 0 ? "none" : string.Join(", ", purged.Removed.Select(p => p.Key + " x" + p.Value)))}; scanned {purged.Scanned} entries in {purged.ElapsedMs} ms)");
 
         var weak = new WeakReference(context);
         context.Unload();

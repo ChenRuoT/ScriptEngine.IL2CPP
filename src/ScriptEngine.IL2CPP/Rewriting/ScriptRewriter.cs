@@ -58,7 +58,14 @@ internal sealed class ScriptRewriter
     /// <param name="files">本批全部脚本 DLL。</param>
     /// <param name="generation">本次重载的代次（用来给注入类改名）。</param>
     /// <param name="warn">非致命问题（例如符号读不出来）。</param>
-    public List<ScriptImage> Rewrite(IReadOnlyList<ScriptFile> files, int generation, Action<string> warn)
+    /// <param name="rejectAssembly">
+    /// 按程序集简单名判断「这份不该当脚本装」，返回警告原因（null = 接受）。生产环境用来挡掉与宿主已加载程序集同名的 DLL
+    /// （BepInEx、Harmony、Il2CppInterop、引擎自己，或同一个插件还留在 plugins/ 里）。
+    /// 必须在分析之前挡：否则这份程序集里的注入类型会进改名表，其它脚本对它的类型引用被改成 .__g{N}，
+    /// 而运行时又回落到宿主那份没改名的 —— TypeLoadException。
+    /// </param>
+    public List<ScriptImage> Rewrite(
+        IReadOnlyList<ScriptFile> files, int generation, Action<string> warn, Func<string, string?>? rejectAssembly = null)
     {
         var resolver = new GenerationResolver(_sharedResolver);
         var loaded = new List<(ScriptFile File, AssemblyDefinition Assembly)>(files.Count);
@@ -73,6 +80,13 @@ internal sealed class ScriptRewriter
                 // 卫星资源程序集（de/X.resources.dll 之类）没有代码，也没有装载价值
                 if (assembly.Name.Name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase))
                 {
+                    assembly.Dispose();
+                    continue;
+                }
+
+                if (rejectAssembly?.Invoke(assembly.Name.Name) is { } reason)
+                {
+                    warn($"{file.Path}: {reason}");
                     assembly.Dispose();
                     continue;
                 }
@@ -93,7 +107,7 @@ internal sealed class ScriptRewriter
 
             // ---- 1. 分析（只读，类型解析都用原始名字） ----
             var renamePlan = new Dictionary<TypeDefinition, string>();                     // 顶层类型 → 新命名空间
-            var renameKeys = new Dictionary<(string Assembly, string FullName), string>(); // 跨程序集引用用
+            var renameKeys = new Dictionary<(string Assembly, string FullName), string>(RenameKeyComparer.Instance); // 跨程序集引用用
             foreach (var (_, assembly) in loaded)
             {
                 foreach (var type in assembly.MainModule.Types)
@@ -113,7 +127,7 @@ internal sealed class ScriptRewriter
             for (var i = 0; i < loaded.Count; i++)
             {
                 var module = loaded[i].Assembly.MainModule;
-                if (!ReferencesBasePluginAssembly(module)) continue;
+                if (!MayContainPlugins(module)) continue;
 
                 foreach (var type in module.Types)
                 {
@@ -206,6 +220,18 @@ internal sealed class ScriptRewriter
 
     // ------------------------------------------------------------------ 分析
 
+    /// <summary>(程序集名, 类型全名) 的比较器：程序集名忽略大小写（Windows 文件系统上程序集引用的大小写不一定和程序集自己的名字一致），类型全名区分大小写。</summary>
+    private sealed class RenameKeyComparer : IEqualityComparer<(string Assembly, string FullName)>
+    {
+        public static readonly RenameKeyComparer Instance = new();
+
+        public bool Equals((string Assembly, string FullName) x, (string Assembly, string FullName) y)
+            => string.Equals(x.Assembly, y.Assembly, StringComparison.OrdinalIgnoreCase) && string.Equals(x.FullName, y.FullName, StringComparison.Ordinal);
+
+        public int GetHashCode((string Assembly, string FullName) key)
+            => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(key.Assembly), StringComparer.Ordinal.GetHashCode(key.FullName));
+    }
+
     internal static string MakeNamespace(string? original, int generation)
     {
         var marker = GenerationNamespaceMarker + generation;
@@ -238,8 +264,13 @@ internal sealed class ScriptRewriter
         return false;
     }
 
-    private static bool ReferencesBasePluginAssembly(ModuleDefinition module)
-        => module.AssemblyReferences.Any(r => r.Name == "BepInEx.Unity.IL2CPP");
+    /// <summary>
+    /// 和 BepInEx 自己的 <c>HasBepinPlugins</c> 一样：程序集引用了 BepInEx.Core 并且用到了 <c>BepInPlugin</c> 特性，才值得逐个类型去查是不是 BasePlugin。
+    /// （不能要求它直接引用 BepInEx.Unity.IL2CPP：继承另一个脚本程序集里的抽象插件基类的插件，只会引用那个基类所在的程序集。）
+    /// </summary>
+    private static bool MayContainPlugins(ModuleDefinition module)
+        => module.AssemblyReferences.Any(r => r.Name == "BepInEx.Core")
+           && module.GetTypeReferences().Any(r => r.FullName == "BepInEx.BepInPlugin");
 
     // ------------------------------------------------------------------ 改写
 
