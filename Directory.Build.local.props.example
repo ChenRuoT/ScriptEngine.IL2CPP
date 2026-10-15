@@ -1,0 +1,9 @@
+<!--
+  复制为 Directory.Build.local.props 后按需覆盖。该文件已在 .gitignore 中。
+  命令行临时覆盖：dotnet build -p:GameDir="E:/OtherEFT"
+-->
+<Project>
+  <PropertyGroup>
+    <GameDir>D:/EFTdev/Client.1.2.0.0.47965</GameDir>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    注入 MonoBehaviour 的示例：验证「第二代同名类型不再报 already injected」，
+    以及引擎的残留清理（LeakyPlugin 故意不销毁自己的组件）。
+  -->
+  <PropertyGroup>
+    <AssemblyName>BehaviourScript</AssemblyName>
+    <RootNamespace>BehaviourScript</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <!-- SharedLib 自己会部署到 scripts/，这里只要编译期引用 -->
+    <ProjectReference Include="../SharedLib/SharedLib.csproj" Private="false" />
+  </ItemGroup>
+
+  <Target Name="DeployToScripts" AfterTargets="Build" Condition="'$(DeployToScripts)' != 'false'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[BehaviourScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

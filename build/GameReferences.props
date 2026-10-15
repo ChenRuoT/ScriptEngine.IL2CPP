@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    编译期引用：全部指向游戏目录里的 BepInEx/core 与 BepInEx/interop，Private=false（运行时由游戏提供）。
+    ⚠️ 不要把 Il2CppDumper 的 DummyDll 之类同名桩程序集放进仓库 —— 它们会顶掉这里的 HintPath（见 AGENTS.md §6）。
+  -->
+
+  <!-- ===== BepInEx 6 运行时（core/） ===== -->
+  <ItemGroup>
+    <Reference Include="BepInEx.Core"><HintPath>$(BepInExCore)/BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP"><HintPath>$(BepInExCore)/BepInEx.Unity.IL2CPP.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Runtime"><HintPath>$(BepInExCore)/Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- ===== IL2CPP 的 BCL 影子程序集 ===== -->
+  <ItemGroup>
+    <Reference Include="Il2Cppmscorlib"><HintPath>$(InteropDir)/Il2Cppmscorlib.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppSystem"><HintPath>$(InteropDir)/Il2CppSystem.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppSystem.Core"><HintPath>$(InteropDir)/Il2CppSystem.Core.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- ===== Unity（interop 代理，不是 unity-libs 里的原件） ===== -->
+  <ItemGroup>
+    <Reference Include="UnityEngine"><HintPath>$(InteropDir)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(InteropDir)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(InteropDir)/UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

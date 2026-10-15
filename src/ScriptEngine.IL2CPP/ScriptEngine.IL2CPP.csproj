@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>ScriptEngine.IL2CPP</AssemblyName>
+    <RootNamespace>ScriptEngineIl2Cpp</RootNamespace>
+    <Product>ScriptEngine.IL2CPP</Product>
+    <Description>Hot-reload engine for BepInEx 6 IL2CPP (BasePlugin) plugins.</Description>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <!-- Cecil 已随 BepInEx 放在 core/，直接引用，不用 NuGet。 -->
+  <ItemGroup>
+    <Reference Include="Mono.Cecil"><HintPath>$(BepInExCore)/Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SemanticVersioning"><HintPath>$(BepInExCore)/SemanticVersioning.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScriptEngine.Tests" />
+  </ItemGroup>
+
+  <!-- 唯一版本来源是 Version.props；生成编译期常量供 BepInPlugin 使用。 -->
+  <Target Name="GenerateReleaseVersion" BeforeTargets="CoreCompile">
+    <WriteLinesToFile File="$(IntermediateOutputPath)ReleaseVersion.g.cs"
+      Lines="namespace ScriptEngineIl2Cpp { internal static class ReleaseVersion { internal const string Value = &quot;$(Version)&quot;%3B } }"
+      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup><Compile Include="$(IntermediateOutputPath)ReleaseVersion.g.cs" /></ItemGroup>
+  </Target>
+
+  <!-- ===== 生成后自动部署到游戏的 plugins/（-p:DeployToGame=false 关闭） ===== -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(DeployToGame)' != 'false'">
+    <MakeDir Directories="$(EngineDeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(EngineDeployDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(EngineDeployDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[ScriptEngine.IL2CPP] deployed -> $(EngineDeployDir)" />
+  </Target>
+
+</Project>

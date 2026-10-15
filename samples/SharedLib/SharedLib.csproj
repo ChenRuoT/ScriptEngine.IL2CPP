@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    被其它脚本引用的「库脚本」：里面没有 BasePlugin，只有一个注入的 MonoBehaviour。
+    用来验证：同一批脚本里跨 DLL 引用注入类型时，引擎对类型引用的改名是一致的。
+  -->
+  <PropertyGroup>
+    <AssemblyName>SharedLib</AssemblyName>
+    <RootNamespace>SharedLib</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <Target Name="DeployToScripts" AfterTargets="Build" Condition="'$(DeployToScripts)' != 'false'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[SharedLib] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

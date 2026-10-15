@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    最小的热重载示例：一个普通 BepInEx 6 IL2CPP 插件，写了 Unload()。
+    dotnet build 之后默认把 DLL+PDB 拷到 <游戏>/BepInEx/scripts/（-p:DeployToScripts=false 关闭）。
+    注意：不要同时放进 BepInEx/plugins/，否则会被 BepInEx 和引擎各装一次。
+  -->
+  <PropertyGroup>
+    <AssemblyName>HelloScript</AssemblyName>
+    <RootNamespace>HelloScript</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <Target Name="DeployToScripts" AfterTargets="Build" Condition="'$(DeployToScripts)' != 'false'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[HelloScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

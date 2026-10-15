@@ -1,0 +1,16 @@
+# 统一换行，避免 Windows 上反复出现 "LF will be replaced by CRLF" 噪音
+* text=auto
+
+*.cs    text diff=csharp
+*.csproj text
+*.props text
+*.md    text
+*.json  text
+
+# 二进制
+*.dll   binary
+*.pdb   binary
+*.png   binary
+*.ogg   binary
+*.ps1   text
+*.slnx  text

@@ -1,0 +1,37 @@
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
+
+  <!-- 本地覆盖（不入库）。要改 GameDir 就复制 Directory.Build.local.props.example。 -->
+  <Import Project="$(MSBuildThisFileDirectory)Directory.Build.local.props" Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.local.props')" />
+
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == ''">D:/EFTdev/Client.1.2.0.0.47965</GameDir>
+    <BepInExDir>$(GameDir)/BepInEx</BepInExDir>
+    <BepInExCore Condition="'$(BepInExCore)' == ''">$(BepInExDir)/core</BepInExCore>
+    <InteropDir Condition="'$(InteropDir)' == ''">$(BepInExDir)/interop</InteropDir>
+    <!-- 引擎本体（普通 BepInEx 插件，常驻，不会被热重载） -->
+    <EngineDeployDir Condition="'$(EngineDeployDir)' == ''">$(BepInExDir)/plugins/ScriptEngine.IL2CPP</EngineDeployDir>
+    <!-- 脚本目录：放进这里的 BasePlugin DLL 会被引擎热重载 -->
+    <ScriptsDir Condition="'$(ScriptsDir)' == ''">$(BepInExDir)/scripts</ScriptsDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- BepInEx 6 (CoreCLR) 插件必须与运行时同大版本：本机 dotnet/coreclr 为 10.0.x -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>portable</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- CS0436: 程序集里类型与引用类型同名（IL2CPP 阴影程序集常见） -->
+    <NoWarn>$(NoWarn);CS0436;NU1510</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Authors>ChenRuoT</Authors>
+    <Copyright>Copyright (c) 2026 ChenRuoT</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+</Project>

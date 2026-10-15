@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    离线测试：不启动游戏，直接对 samples/ 编出来的脚本 DLL 跑「改写 → 装进可回收上下文 → 实例化 → 卸载 → 回收」。
+    运行：在仓库根目录执行 dotnet run 并指定本项目（tests/ScriptEngine.Tests）
+    运行时依赖（BepInEx / Il2CppInterop / interop 代理 / Cecil）不拷贝，Program.cs 会从游戏目录解析。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ScriptEngine.Tests</AssemblyName>
+    <RootNamespace>ScriptEngine.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <Reference Include="Mono.Cecil"><HintPath>$(BepInExCore)/Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SemanticVersioning"><HintPath>$(BepInExCore)/SemanticVersioning.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 测试时不要把引擎部署进游戏目录 -->
+    <ProjectReference Include="../../src/ScriptEngine.IL2CPP/ScriptEngine.IL2CPP.csproj" AdditionalProperties="DeployToGame=false" />
+    <ProjectReference Include="../../samples/HelloScript/HelloScript.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+    <ProjectReference Include="../../samples/BehaviourScript/BehaviourScript.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+    <ProjectReference Include="../../samples/SharedLib/SharedLib.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+    <ProjectReference Include="../fixtures/ConsumerFixture/ConsumerFixture.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GameDir</_Parameter1>
+      <_Parameter2>$(GameDir)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RepoRoot</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

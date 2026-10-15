@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/BehaviourScript/BehaviourScript.csproj" />
+    <Project Path="samples/FaultyScript/FaultyScript.csproj" />
+    <Project Path="samples/HelloScript/HelloScript.csproj" />
+    <Project Path="samples/SharedLib/SharedLib.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/ScriptEngine.IL2CPP/ScriptEngine.IL2CPP.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ScriptEngine.Tests/ScriptEngine.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/fixtures/">
+    <Project Path="tests/fixtures/ConsumerFixture/ConsumerFixture.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    故意失败的插件：Load() 一定抛异常。用来验证引擎的出错路径
+    （异常带行号写进日志、其它脚本照常加载、残留状态被收拾干净）。
+    默认不部署到 scripts/，需要时：dotnet build samples/FaultyScript -p:DeployToScripts=true
+  -->
+  <PropertyGroup>
+    <AssemblyName>FaultyScript</AssemblyName>
+    <RootNamespace>FaultyScript</RootNamespace>
+    <DeployToScripts Condition="'$(DeployToScripts)' == ''">false</DeployToScripts>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <Target Name="DeployToScriptsTarget" AfterTargets="Build" Condition="'$(DeployToScripts)' == 'true'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[FaultyScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

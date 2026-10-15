@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    离线测试夹具（不是示例，不部署）：一个自己没有任何注入类型、也不用 Assembly.Location 的插件，
+    它唯一的特别之处是引用了 SharedLib 里会被改名的注入类型。
+    引擎必须因为「类型引用被改写」而重新写出这个程序集，否则它装载后还指向旧名字。
+  -->
+  <PropertyGroup>
+    <AssemblyName>ConsumerFixture</AssemblyName>
+    <RootNamespace>ConsumerFixture</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <ProjectReference Include="../../../samples/SharedLib/SharedLib.csproj" Private="false" AdditionalProperties="DeployToScripts=false" />
+  </ItemGroup>
+
+</Project>
