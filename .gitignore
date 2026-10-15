@@ -5,6 +5,7 @@ obj/
 *.user
 *.suo
 artifacts/
+.buildrefs/
 
 # 本地覆盖（GameDir 等）
 Directory.Build.local.props
@@ -12,5 +13,6 @@ Directory.Build.local.props
 # 本地工作入口文档（交接用，不入库）
 AGENTS.md
 
-# 本地评审稿 / 交接材料，故意不入库
-docs/
+# docs/ 默认不入库（本地评审稿 / 交接材料），只放行维护文档
+docs/*
+!docs/RELEASING.md

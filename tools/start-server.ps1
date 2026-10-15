@@ -8,11 +8,13 @@
   - 想关掉自己起的这个：.\stop-server.ps1（只杀 %TEMP%\se-server.pid 里记的那个）。
 #>
 param(
-    [string]$GameDir = 'D:\EFTdev\Client.1.2.0.0.47965',
+    [string]$GameDir = $env:SE_GAME_DIR,   # 或 -GameDir 显式指定
     [int]$TimeoutSec = 90
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($GameDir)) { throw '没给游戏根目录：设环境变量 SE_GAME_DIR，或传 -GameDir' }
 
 if (Get-NetTCPConnection -LocalPort 6969 -State Listen -ErrorAction SilentlyContinue) {
     Write-Host '6969 已经在监听：沿用现有的服务端，不再启动'

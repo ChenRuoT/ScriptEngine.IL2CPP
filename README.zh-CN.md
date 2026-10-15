@@ -8,6 +8,8 @@
 > 在 BepInEx 6 IL2CPP 下它根本不会被识别为插件，核心做法（`AddComponent` 把插件当 MonoBehaviour 挂上去、
 > `Assembly.Load(bytes)` 进默认上下文）在 IL2CPP 上也走不通。本项目为 IL2CPP 重新设计，**不是**它的移植。
 
+引擎不绑定任何具体游戏：普通 BepInEx 6 安装能用，**SPT**（Single Player Tarkov）下同样能用 —— 真机验证大部分也是在 SPT 环境里做的。
+
 ## 环境要求
 
 | | |
@@ -204,12 +206,12 @@ dotnet build samples/HelloScript                                         # 示�
 dotnet run --project tests/ScriptEngine.Tests                            # 离线测试：不启动游戏
 ```
 
-- 构建需要游戏自带的 `BepInEx/core` 与 `BepInEx/interop` 程序集（所有编译引用都指向那里）。把 `GameDir` 指向游戏根目录：
-  复制 `Directory.Build.local.props.example` 为 `Directory.Build.local.props`（已 gitignore）再改，或命令行 `-p:GameDir=...`。
+- 构建需要游戏自带的 `BepInEx/core` 与 `BepInEx/interop` 程序集（所有编译引用都指向那里）。`GameDir` 必须指向游戏根目录，优先级：命令行 `-p:GameDir=...` > `Directory.Build.local.props`（复制 `.example`，已 gitignore）> 环境变量 `SE_GAME_DIR`。三样都没给时构建会直接停下并给出明确提示，而不是一堆莫名其妙的引用错误。
+- 离线测试只要那批程序集、不需要游戏本体：它会自己造一个临时游戏根目录。CI 用一份锁定版本的私有压缩包（正好就是这批程序集）跑这些测试，见 [docs/RELEASING.md](docs/RELEASING.md)。
 - 游戏运行时引擎 DLL 被锁，部署会失败（`-p:DeployToGame=false` 跳过）；脚本 DLL 不会被锁。
 - Mono.Cecil 随 BepInEx 提供，不需要 NuGet。
 - 离线测试覆盖改写器、加载上下文的回收、Harmony 补丁的撤销与回收、文件监视 / 命令通道、PDB 匹配等纯托管部分（需要游戏目录里的 DLL，但不启动游戏）。
-- `tools/package.ps1` 打 Release zip。`tools/` 下启动 / 驱动游戏的脚本（`start-game.ps1`、`stop-game.ps1`、`start-server.ps1`、`stop-server.ps1`、`send-key.ps1`）是开发环境用的辅助工具，绑定了那套环境的进程名和启动流程；它们只动自己起的进程。
+- `tools/release/package.ps1` 打 Release zip（并附 `.sha256`）；`tools/release/notes.ps1` 和 `tools/release/publish.ps1` 是 CI 用来发 GitHub Release 的，`tools/release/buildrefs.lock.json` 锁定私有编译参考压缩包。`tools/` 直接下面那些启动 / 驱动游戏的脚本（`start-game.ps1`、`stop-game.ps1`、`start-server.ps1`、`stop-server.ps1`、`send-key.ps1`）是开发环境用的辅助工具，绑定了那套环境的进程名和启动流程；它们只动自己起的进程。
 
 ## 许可证与致谢
 

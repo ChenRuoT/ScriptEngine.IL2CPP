@@ -62,7 +62,12 @@ internal static partial class Program
         // BasePlugin 的构造函数要用 Paths / Logger / ConfigFile：把它们指到临时目录，别碰真实游戏的 BepInEx 配置
         var temp = Path.Combine(Path.GetTempPath(), "ScriptEngine.Tests." + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
-        Paths.SetExecutablePath(Path.Combine(_gameDir, "EscapeFromTarkov.exe"), Path.Combine(temp, "BepInEx"));
+        // BasePlugin 的构造函数要用 Paths / Logger / ConfigFile，所以这里指到一个临时的「假游戏根目录」上：
+        // 既不碰真实游戏的 BepInEx 配置，也不要求那儿真的躺着游戏 exe
+        // （CI 的编译参考里只有 BepInEx/core + interop，没有游戏本体；而 Paths 要求 <游戏根>/Data 或 <进程名>_Data 存在）。
+        var fakeGameRoot = Path.Combine(temp, "game");
+        Directory.CreateDirectory(Path.Combine(fakeGameRoot, "Data"));
+        Paths.SetExecutablePath(Path.Combine(fakeGameRoot, "Game.exe"), Path.Combine(temp, "BepInEx"));
         Directory.CreateDirectory(Paths.ConfigPath);
 
         try

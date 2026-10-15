@@ -5,7 +5,12 @@
   <Import Project="$(MSBuildThisFileDirectory)Directory.Build.local.props" Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.local.props')" />
 
   <PropertyGroup>
-    <GameDir Condition="'$(GameDir)' == ''">D:/EFTdev/Client.1.2.0.0.47965</GameDir>
+    <!--
+      GameDir 取值优先级：命令行 -p:GameDir=... > Directory.Build.local.props > 环境变量 SE_GAME_DIR。
+      仓库里不写死任何本机路径；三样都没给的话 ValidateGameDir 会给出明确报错。
+      （MSBuild 会把环境变量直接当成同名属性，所以 $(SE_GAME_DIR) 就是那个环境变量。）
+    -->
+    <GameDir Condition="'$(GameDir)' == ''">$(SE_GAME_DIR)</GameDir>
     <BepInExDir>$(GameDir)/BepInEx</BepInExDir>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(BepInExDir)/core</BepInExCore>
     <InteropDir Condition="'$(InteropDir)' == ''">$(BepInExDir)/interop</InteropDir>
@@ -29,9 +34,25 @@
     <NoWarn>$(NoWarn);CS0436;NU1510</NoWarn>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!--
+      重要：CI 会把编译参考（BepInEx/core + interop）解压到仓库内的 .buildrefs/ 下，
+      其中的 interop 程序集和 HintPath 指向的是同一批文件名。默认 glob 会把它们收成 @(None)，
+      而 MSBuild 把 @(None) 当作 CandidateAssemblyFiles，{CandidateAssemblyFiles} 排在 AssemblySearchPaths 首位
+      ——HintPath 引用就会被这些副本顶掉（编译能过但语义可能全错）。所以必须排除。
+      artifacts/ 同理（打包产物不进默认 glob）。
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);.buildrefs/**;artifacts/**</DefaultItemExcludes>
     <Authors>ChenRuoT</Authors>
     <Copyright>Copyright (c) 2026 ChenRuoT</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
+
+  <!-- 没有游戏目录时的明确报错（设计时构建不打扰 IDE） -->
+  <Target Name="ValidateGameDir" BeforeTargets="BeforeBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir 没设置：请把环境变量 SE_GAME_DIR 指向游戏根目录（BepInEx 所在的那一层），或复制 Directory.Build.local.props.example 为 Directory.Build.local.props 再改，或命令行 -p:GameDir=...。" />
+    <Error Condition="'$(GameDir)' != '' and !Exists('$(BepInExCore)/BepInEx.Core.dll')"
+           Text="GameDir=$(GameDir) 下面找不到 $(BepInExCore)/BepInEx.Core.dll —— 这个路径要指向游戏根目录（即 BepInEx 文件夹所在的那一层），不是 BepInEx 本身。" />
+  </Target>
 
 </Project>

@@ -13,11 +13,13 @@
 #>
 param(
     [ValidateSet('reload', 'unload', 'status')][string]$Command = 'reload',
-    [string]$GameDir = 'D:\EFTdev\Client.1.2.0.0.47965',
+    [string]$GameDir = $env:SE_GAME_DIR,   # 或 -GameDir 显式指定
     [int]$TimeoutSec = 60
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($GameDir)) { throw '没给游戏根目录：设环境变量 SE_GAME_DIR，或传 -GameDir' }
 
 $dir = Join-Path $GameDir 'BepInEx\ScriptEngine.IL2CPP\commands'
 New-Item -ItemType Directory -Force $dir | Out-Null

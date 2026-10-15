@@ -8,6 +8,8 @@
 > Under BepInEx 6 / IL2CPP it is not even recognised as a plugin, and its core technique (`AddComponent` to hang the plugin on a GameObject,
 > `Assembly.Load(bytes)` into the default context) does not work on IL2CPP either. This project was re-designed for IL2CPP — it is **not** a port of it.
 
+Nothing in the engine is tied to a particular game: it works on a plain BepInEx 6 install and equally with **SPT** (Single Player Tarkov), where most of its real-game verification was done.
+
 ## Requirements
 
 | | |
@@ -205,12 +207,12 @@ dotnet build samples/HelloScript                                         # sampl
 dotnet run --project tests/ScriptEngine.Tests                            # offline tests: no game is launched
 ```
 
-- Building requires the game's own `BepInEx/core` and `BepInEx/interop` assemblies (that is where every compile-time reference points). Set `GameDir` to the game root:
-  copy `Directory.Build.local.props.example` to `Directory.Build.local.props` (git-ignored) and edit it, or pass `-p:GameDir=...`.
+- Building requires the game's own `BepInEx/core` and `BepInEx/interop` assemblies (that is where every compile-time reference points). `GameDir` must point at the game root; in order of precedence: `-p:GameDir=...` on the command line, a `Directory.Build.local.props` (copy the `.example` — it is git-ignored), or the `SE_GAME_DIR` environment variable. With none of them set the build stops with an explicit message instead of a confusing reference error.
+- The offline tests need those assemblies but nothing else from the game: they fabricate a throwaway game root of their own. CI runs them against a pinned private archive of exactly those assemblies (see [docs/RELEASING.md](docs/RELEASING.md)).
 - While the game is running the engine DLL is locked and deployment fails (use `-p:DeployToGame=false` to skip it); script DLLs are not locked.
 - Mono.Cecil ships with BepInEx, so no NuGet packages are needed.
 - The offline tests cover the rewriter, context collection, Harmony patch undo and collection, file watching / the command channel, PDB matching and the rest of the pure managed logic (they need the game's DLLs, but never start the game).
-- `tools/package.ps1` builds a Release zip. The scripts under `tools/` that launch or drive a game (`start-game.ps1`, `stop-game.ps1`, `start-server.ps1`, `stop-server.ps1`, `send-key.ps1`) are helpers for the environment this was developed in and are wired to that setup's process names and launch flow; they only ever touch processes they started themselves.
+- `tools/release/package.ps1` builds a Release zip plus its `.sha256`; `tools/release/notes.ps1` and `tools/release/publish.ps1` are what CI uses to publish a GitHub Release, and `tools/release/buildrefs.lock.json` pins the private compilation-reference archive. The scripts directly under `tools/` that launch or drive a game (`start-game.ps1`, `stop-game.ps1`, `start-server.ps1`, `stop-server.ps1`, `send-key.ps1`) are helpers for the environment this was developed in and are wired to that setup's process names and launch flow; they only ever touch processes they started themselves.
 
 ## License and credits
 

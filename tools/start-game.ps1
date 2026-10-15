@@ -9,10 +9,12 @@
   - 想关掉自己起的这个进程：.\stop-game.ps1（只杀 %TEMP%\se-game.pid 里记的那个）。
 #>
 param(
-    [string]$GameDir = 'D:\EFTdev\Client.1.2.0.0.47965'
+    [string]$GameDir = $env:SE_GAME_DIR   # 或 -GameDir 显式指定
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($GameDir)) { throw '没给游戏根目录：设环境变量 SE_GAME_DIR，或传 -GameDir' }
 
 if (Get-Process EscapeFromTarkov -ErrorAction SilentlyContinue) {
     throw '游戏已经在运行：先退出它（脚本不会去动正在玩的那一局）'
