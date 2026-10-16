@@ -24,6 +24,7 @@ internal static partial class Program
         HostAssembliesAreRejectedBeforeAnalysis();
         RenameKeysIgnoreAssemblyNameCase();
         PluginDiscoveryFollowsRenamedBaseClasses();
+        LoadOrderFollowsDependencies();
         PurgerTargetsAreRealTypes();
         PurgerMatchesDeadAssemblies();
         PdbMatching();
@@ -133,6 +134,37 @@ internal static partial class Program
         var assemblies = context.LoadAll();
         var derivedType = assemblies.Single(a => a.GetName().Name == "DerivedPluginFixture").GetType("DerivedPluginFixture.DerivedPlugin")!;
         Check(derivedType.BaseType?.FullName == "PluginBaseFixture.__g6.PluginBase", $"its base type is the renamed one (got {derivedType.BaseType?.FullName})");
+    }
+
+    // ------------------------------------------------------------------ 主模组 + 副模组都在 scripts/
+
+    private static void LoadOrderFollowsDependencies()
+    {
+        Section("Load order: a mod that depends on another script comes after it — by [BepInDependency] or just by assembly reference");
+
+        // 副模组的 GUID（…aconsumer）字母序在主模组（…zmain）之前，所以只有真的按依赖排序才会让主模组先装
+        List<string> Order(params string[] names)
+        {
+            var images = Rewrite(20, names);
+            var candidates = images.SelectMany(i => i.Plugins.Select(p => (p, (Assembly)null!, i))).ToList();
+            var report = new ReloadReport(BepInEx.Logging.Logger.CreateLogSource("order-test"), "test");
+            var ordered = ScriptHost.OrderByDependencies(candidates, images, report).Select(c => c.Info.Metadata.GUID).ToList();
+            Check(report.Errors.Count == 0, "no ordering error reported");
+            return ordered;
+        }
+
+        const string main = "com.shiunaya.samples.dep.zmain";
+        Check(Order("DepConsumerScript", "DepMainScript").SequenceEqual(new[] { main, "com.shiunaya.samples.dep.aconsumer" }), "[BepInDependency]: main first");
+        Check(Order("DepConsumerFixture", "DepMainScript").SequenceEqual(new[] { main, "com.shiunaya.fixtures.dep.aconsumer" }), "assembly reference only (no [BepInDependency]): main first");
+        Check(Order("DepMainScript", "DepConsumerFixture").First() == main, "...regardless of the order the files were given in");
+
+        // 程序集引用成环：退回只按 [BepInDependency]，不报错、不丢插件
+        var cyclic = Rewrite(21, "DepConsumerScript", "DepMainScript");
+        cyclic.Single(i => i.AssemblyName == "DepMainScript").ReferencedAssemblies.Add("DepConsumerScript");
+        var candidatesCyclic = cyclic.SelectMany(i => i.Plugins.Select(p => (p, (Assembly)null!, i))).ToList();
+        var cyclicReport = new ReloadReport(BepInEx.Logging.Logger.CreateLogSource("order-test"), "test");
+        var cyclicOrder = ScriptHost.OrderByDependencies(candidatesCyclic, cyclic, cyclicReport).Select(c => c.Info.Metadata.GUID).ToList();
+        Check(cyclicReport.Errors.Count == 0 && cyclicOrder.Count == 2 && cyclicOrder[0] == main, "a reference cycle falls back to the declared [BepInDependency] order");
     }
 
     // ------------------------------------------------------------------ 评审 #3

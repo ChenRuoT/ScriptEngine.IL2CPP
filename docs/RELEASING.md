@@ -76,7 +76,7 @@ $env:SE_GAME_DIR = '<游戏根目录>'   # ① 环境变量（一次 setx 长期
 发布前本地完整跑一遍（与 CI 一致）：
 
 ```powershell
-dotnet run --project tests/ScriptEngine.Tests -c Release -warnaserror   # 87 项离线测试，不启动游戏
+dotnet run --project tests/ScriptEngine.Tests -c Release -warnaserror   # 94 项离线测试，不启动游戏
 pwsh -File tools/release/package.ps1                                     # 出 zip + .sha256
 pwsh -File tools/release/notes.ps1 -Version 0.1.0 -OutFile notes.md      # 预览 Release 正文
 ```

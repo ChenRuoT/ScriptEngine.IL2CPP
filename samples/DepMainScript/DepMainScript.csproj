@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    「主模组 + 依赖它的副模组都放在 scripts/」场景的主模组（配合 DepConsumerScript）：
+    原版 ScriptEngine 的已知痛点是副模组加载不到放在 scripts/ 里的主模组。
+    主模组带一个注入的 MonoBehaviour（会被引擎改名），Load() 里记下自己的装载序号。
+    默认不部署到 scripts/，需要时：dotnet build samples/DepMainScript -p:DeployToScripts=true
+  -->
+  <PropertyGroup>
+    <AssemblyName>DepMainScript</AssemblyName>
+    <RootNamespace>DepMainScript</RootNamespace>
+    <DeployToScripts Condition="'$(DeployToScripts)' == ''">false</DeployToScripts>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <Target Name="DeployToScriptsTarget" AfterTargets="Build" Condition="'$(DeployToScripts)' == 'true'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[DepMainScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>

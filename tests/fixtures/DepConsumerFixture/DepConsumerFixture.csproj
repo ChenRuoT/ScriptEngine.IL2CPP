@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 离线测试夹具（不是示例，不部署）：只引用 DepMainScript 的程序集、不写 [BepInDependency] 的副模组。 -->
+  <PropertyGroup>
+    <AssemblyName>DepConsumerFixture</AssemblyName>
+    <RootNamespace>DepConsumerFixture</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <ProjectReference Include="../../../samples/DepMainScript/DepMainScript.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

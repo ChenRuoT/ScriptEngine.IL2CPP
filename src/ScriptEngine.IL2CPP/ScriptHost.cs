@@ -280,7 +280,7 @@ internal sealed class ScriptHost
             candidates.AddRange(image.Plugins.Select(info => (info, assembly, image)));
         }
 
-        foreach (var (info, assembly, image) in OrderByDependencies(candidates, report))
+        foreach (var (info, assembly, image) in OrderByDependencies(candidates, images, report))
             LoadPlugin(generation, info, assembly, image, report);
 
         if (candidates.Count == 0)
@@ -289,8 +289,8 @@ internal sealed class ScriptHost
                 : "No BasePlugin classes found in the script DLLs.");
     }
 
-    private static List<(PluginInfo Info, Assembly Assembly, ScriptImage Image)> OrderByDependencies(
-        List<(PluginInfo Info, Assembly Assembly, ScriptImage Image)> candidates, ReloadReport report)
+    internal static List<(PluginInfo Info, Assembly Assembly, ScriptImage Image)> OrderByDependencies(
+        List<(PluginInfo Info, Assembly Assembly, ScriptImage Image)> candidates, IReadOnlyList<ScriptImage> images, ReloadReport report)
     {
         // 同 GUID 只留版本最高的一份
         var byGuid = new Dictionary<string, (PluginInfo Info, Assembly Assembly, ScriptImage Image)>();
@@ -302,19 +302,65 @@ internal sealed class ScriptHost
                 byGuid[candidate.Info.Metadata.GUID] = candidate;
         }
 
-        IEnumerable<string> guids = byGuid.Keys;
+        var sorted = new List<string>(byGuid.Keys.OrderBy(g => g, StringComparer.OrdinalIgnoreCase));
+
+        // 依赖边 = [BepInDependency] + 程序集引用（副模组没写 BepInDependency、只是引用了主模组的程序集，也要让主模组先装）。
+        // 程序集引用可能成环（A、B 互相引用），成环就退回只按 [BepInDependency]：那是插件作者明确声明的，环了就是真的有问题。
+        var assemblyEdges = AssemblyDependencies(byGuid, images);
+        IEnumerable<string> Edges(string guid, bool withAssemblies)
+        {
+            var edges = byGuid[guid].Info.Dependencies.Select(d => d.DependencyGUID).Where(byGuid.ContainsKey);
+            return withAssemblies ? edges.Concat(assemblyEdges[guid]) : edges;
+        }
+
         try
         {
-            guids = Utility.TopologicalSort(
-                byGuid.Keys.OrderBy(g => g, StringComparer.OrdinalIgnoreCase).ToList(),
-                guid => byGuid[guid].Info.Dependencies.Select(d => d.DependencyGUID).Where(byGuid.ContainsKey)).ToList();
+            return Utility.TopologicalSort(sorted, g => Edges(g, withAssemblies: true)).Select(g => byGuid[g]).ToList();
+        }
+        catch (Exception)
+        {
+            // 退回只按 [BepInDependency]
+        }
+
+        try
+        {
+            return Utility.TopologicalSort(sorted, g => Edges(g, withAssemblies: false)).Select(g => byGuid[g]).ToList();
         }
         catch (Exception ex)
         {
             report.Error($"Plugin dependency order could not be resolved, loading in arbitrary order: {ex.Message}");
+            return sorted.Select(g => byGuid[g]).ToList();
+        }
+    }
+
+    /// <summary>每个插件所依赖的、其它脚本程序集里的插件 GUID（沿着程序集引用传递：副模组 → 库 → 主模组也算）。</summary>
+    private static Dictionary<string, List<string>> AssemblyDependencies(
+        Dictionary<string, (PluginInfo Info, Assembly Assembly, ScriptImage Image)> byGuid, IReadOnlyList<ScriptImage> images)
+    {
+        var referencesByName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var image in images) referencesByName[image.AssemblyName] = image.ReferencedAssemblies;
+
+        var result = new Dictionary<string, List<string>>();
+        foreach (var (guid, candidate) in byGuid)
+        {
+            var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pending = new Stack<string>(candidate.Image.ReferencedAssemblies);
+            while (pending.Count > 0)
+            {
+                var name = pending.Pop();
+                if (!referencesByName.TryGetValue(name, out var next) || !reachable.Add(name)) continue; // 只走本批脚本
+                foreach (var reference in next) pending.Push(reference);
+            }
+
+            result[guid] = byGuid
+                .Where(other => other.Key != guid
+                                && !string.Equals(other.Value.Image.AssemblyName, candidate.Image.AssemblyName, StringComparison.OrdinalIgnoreCase)
+                                && reachable.Contains(other.Value.Image.AssemblyName))
+                .Select(other => other.Key)
+                .ToList();
         }
 
-        return guids.Select(g => byGuid[g]).ToList();
+        return result;
     }
 
     private void LoadPlugin(ScriptGeneration generation, PluginInfo info, Assembly assembly, ScriptImage image, ReloadReport report)

@@ -44,6 +44,9 @@ internal sealed class ScriptImage
     /// <summary>是否经过 Cecil 改写（false = 原样字节）。</summary>
     public bool Rewritten { get; set; }
 
+    /// <summary>该程序集直接引用的程序集简单名（装载顺序用：引用了另一个脚本里的插件，就让它先装）。</summary>
+    public List<string> ReferencedAssemblies { get; } = new();
+
     /// <summary>被改名的顶层类型：原全名 → 新全名。</summary>
     public List<KeyValuePair<string, string>> RenamedTypes { get; } = new();
 

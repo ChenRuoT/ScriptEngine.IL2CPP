@@ -142,6 +142,7 @@ internal sealed class ScriptRewriter
             {
                 var image = new ScriptImage(file.Path, assembly.Name.Name, file.Dll, file.Pdb);
                 var module = assembly.MainModule;
+                image.ReferencedAssemblies.AddRange(module.AssemblyReferences.Select(r => r.Name));
 
                 foreach (var type in module.Types)
                 {

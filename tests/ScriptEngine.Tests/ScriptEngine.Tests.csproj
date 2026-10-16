@@ -29,6 +29,9 @@
     <ProjectReference Include="../fixtures/ConsumerFixture/ConsumerFixture.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
     <ProjectReference Include="../fixtures/HostPatchFixture/HostPatchFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../fixtures/PluginBaseFixture/PluginBaseFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../samples/DepMainScript/DepMainScript.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+    <ProjectReference Include="../../samples/DepConsumerScript/DepConsumerScript.csproj" ReferenceOutputAssembly="false" AdditionalProperties="DeployToScripts=false" />
+    <ProjectReference Include="../fixtures/DepConsumerFixture/DepConsumerFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../fixtures/DerivedPluginFixture/DerivedPluginFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

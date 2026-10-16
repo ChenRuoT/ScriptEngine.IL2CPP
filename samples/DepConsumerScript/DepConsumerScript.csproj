@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    依赖 DepMainScript 的副模组（两者都放在 scripts/）。
+    默认带 [BepInDependency]；-p:DepAttribute=false 则不带，用来验证「只引用了程序集、没写 BepInDependency」时的装载顺序。
+    默认不部署到 scripts/，需要时：dotnet build samples/DepConsumerScript -p:DeployToScripts=true
+  -->
+  <PropertyGroup>
+    <AssemblyName>DepConsumerScript</AssemblyName>
+    <RootNamespace>DepConsumerScript</RootNamespace>
+    <DeployToScripts Condition="'$(DeployToScripts)' == ''">false</DeployToScripts>
+    <DepAttribute Condition="'$(DepAttribute)' == ''">true</DepAttribute>
+    <DefineConstants Condition="'$(DepAttribute)' == 'true'">$(DefineConstants);WITH_DEPENDENCY_ATTRIBUTE</DefineConstants>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../build/GameReferences.props" />
+
+  <ItemGroup>
+    <ProjectReference Include="../DepMainScript/DepMainScript.csproj" Private="false" />
+  </ItemGroup>
+
+  <Target Name="DeployToScriptsTarget" AfterTargets="Build" Condition="'$(DeployToScripts)' == 'true'">
+    <MakeDir Directories="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ScriptsDir)" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsDir)" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    <Message Importance="high" Text="[DepConsumerScript] deployed -> $(ScriptsDir)" />
+  </Target>
+
+</Project>
